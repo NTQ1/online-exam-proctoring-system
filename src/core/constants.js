@@ -1,0 +1,15 @@
+export const STORAGE_KEYS = {
+  AUTH_TOKEN: 'authToken',
+  SESSION_ID: 'sessionId',
+  SERVER_URL: 'serverUrl',
+  STUDENT_INFO: 'studentInfo',
+  ROOM_CODE: 'roomCode',
+  START_TIME: 'startTime',
+};
+
+export const MESSAGE_TYPES = {
+  START_PROCTORING: 'START_PROCTORING',
+  STOP_PROCTORING: 'STOP_PROCTORING',
+  REPORT_VIOLATION: 'REPORT_VIOLATION',
+  GET_SESSION_INFO: 'GET_SESSION_INFO',
+};

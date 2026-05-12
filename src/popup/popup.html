@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hệ Thống Giám Sát Thi</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="logo-section">
+      <h1 class="title">🎓 Hệ Thống Giám Sát Thi</h1>
+    </div>
+
+    <!-- Trạng thái lỗi -->
+    <div id="errorMessage" class="alert alert-error" style="display: none;"></div>
+
+    <!-- Trạng thái thành công -->
+    <div id="successMessage" class="alert alert-success" style="display: none;"></div>
+
+    <!-- Form chính -->
+    <form id="authForm" class="form">
+      <div class="form-group">
+        <label for="roomCode">Mã Phòng Thi <span class="required">*</span></label>
+        <input 
+          type="text" 
+          id="roomCode" 
+          placeholder="Ví dụ: ROOM001" 
+          required
+          maxlength="20"
+        >
+        <small class="hint">Nhập mã phòng thi do giáo viên cung cấp</small>
+      </div>
+
+      <div class="form-group">
+        <label for="studentName">Họ Và Tên <span class="required">*</span></label>
+        <input 
+          type="text" 
+          id="studentName" 
+          placeholder="Nhập họ và tên của bạn" 
+          required
+          maxlength="100"
+        >
+      </div>
+
+      <div class="form-group">
+        <label for="studentId">Mã Số Sinh Viên (MSV) <span class="required">*</span></label>
+        <input 
+          type="text" 
+          id="studentId" 
+          placeholder="Nhập MSV của bạn" 
+          required
+          maxlength="20"
+        >
+      </div>
+
+      <button type="submit" id="submitBtn" class="btn btn-primary">
+        <span class="btn-text">Bắt Đầu Giám Sát</span>
+        <span class="btn-loading" style="display: none;">Đang xác thực...</span>
+      </button>
+    </form>
+
+    <!-- Phần thông tin -->
+    <div class="info-section">
+      <details>
+        <summary>📋 Hướng Dẫn Sử Dụng</summary>
+        <div class="info-content">
+          <p><strong>Bước 1:</strong> Nhập mã phòng thi do giáo viên cung cấp</p>
+          <p><strong>Bước 2:</strong> Điền họ tên và MSV của bạn</p>
+          <p><strong>Bước 3:</strong> Nhấn "Bắt Đầu Giám Sát" để kết nối</p>
+          <p><strong>Lưu ý:</strong> Không được rời tab trình duyệt trong quá trình thi</p>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
