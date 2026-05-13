@@ -17,10 +17,58 @@ function createEnvelope(type, data) {
   return { id: genId(), type, source: getSource(), ts: Date.now(), data };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendWithRetry(fn, maxRetries = 2, delay = 100) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      const message = String(error?.message || '');
+      const isPortClosed = message.includes('message port closed before a response was received');
+
+      if (attempt === maxRetries || !isPortClosed) {
+        throw error;
+      }
+
+      await wait(delay * (attempt + 1));
+    }
+  }
+}
+
+function sendRuntimeMessage(envelope) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(envelope, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
+function sendTabMessage(tabId, envelope) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, envelope, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
 export async function sendToBackground(type, data = null, timeout = DEFAULT_TIMEOUT) {
   return new Promise((resolve, reject) => {
     const envelope = createEnvelope(type, data);
     let finished = false;
+
     const timer = setTimeout(() => {
       if (finished) return;
       finished = true;
@@ -28,16 +76,19 @@ export async function sendToBackground(type, data = null, timeout = DEFAULT_TIME
       reject(new Error('sendToBackground timeout'));
     }, timeout);
 
-    chrome.runtime.sendMessage(envelope, (response) => {
+    sendWithRetry(() => sendRuntimeMessage(envelope)).then((response) => {
       if (finished) return;
+
       clearTimeout(timer);
       finished = true;
-      if (chrome.runtime.lastError) {
-        logger.error('sendToBackground error', chrome.runtime.lastError.message);
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(response);
-      }
+      resolve(response);
+    }).catch((error) => {
+      if (finished) return;
+
+      clearTimeout(timer);
+      finished = true;
+      logger.error('sendToBackground error', error.message);
+      reject(error);
     });
   });
 }
@@ -46,6 +97,7 @@ export async function sendToTab(tabId, type, data = null, timeout = DEFAULT_TIME
   return new Promise((resolve, reject) => {
     const envelope = createEnvelope(type, data);
     let finished = false;
+
     const timer = setTimeout(() => {
       if (finished) return;
       finished = true;
@@ -53,16 +105,19 @@ export async function sendToTab(tabId, type, data = null, timeout = DEFAULT_TIME
       reject(new Error('sendToTab timeout'));
     }, timeout);
 
-    chrome.tabs.sendMessage(tabId, envelope, (response) => {
+    sendWithRetry(() => sendTabMessage(tabId, envelope)).then((response) => {
       if (finished) return;
+
       clearTimeout(timer);
       finished = true;
-      if (chrome.runtime.lastError) {
-        logger.error('sendToTab error', chrome.runtime.lastError.message);
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(response);
-      }
+      resolve(response);
+    }).catch((error) => {
+      if (finished) return;
+
+      clearTimeout(timer);
+      finished = true;
+      logger.error('sendToTab error', error.message);
+      reject(error);
     });
   });
 }
@@ -72,9 +127,15 @@ export function onMessage(handlersOrFn, options = {}) {
 
   function listener(message, sender, sendResponse) {
     const { type, data } = message || {};
+    logger.debug('onMessage listener called with type:', type);
 
     if (!type) {
       logger.warn('onMessage received malformed message', { message, sender });
+      return false;
+    }
+
+    if (sender?.id && sender.id !== chrome.runtime.id) {
+      logger.warn('Message from different extension, ignored', sender.id);
       return false;
     }
 
@@ -92,23 +153,48 @@ export function onMessage(handlersOrFn, options = {}) {
 
     const isFn = typeof handlersOrFn === 'function';
     if (isFn) {
-      Promise.resolve(handlersOrFn(data, sender, message))
-        .then((result) => sendResponse(result))
-        .catch((error) => {
-          logger.error(`onMessage handler error for ${type}:`, error);
-          sendResponse({ error: error.message });
-        });
+      try {
+        const result = handlersOrFn(data, sender, message);
+        if (result && typeof result.then === 'function') {
+          result
+            .then((resolved) => sendResponse(resolved))
+            .catch((error) => {
+              logger.error(`onMessage handler error for ${type}:`, error);
+              sendResponse({ error: error.message });
+            });
+        } else {
+          sendResponse(result);
+        }
+      } catch (error) {
+        logger.error(`onMessage handler error for ${type}:`, error);
+        sendResponse({ error: error.message });
+      }
       return true;
     }
 
     const handler = handlersOrFn[type];
     if (handler) {
-      Promise.resolve(handler(data, sender))
-        .then((result) => sendResponse(result))
-        .catch((error) => {
-          logger.error(`Handler ${type} error:`, error);
-          sendResponse({ error: error.message });
-        });
+      logger.debug('Found handler for type:', type);
+      try {
+        const result = handler(data, sender);
+        if (result && typeof result.then === 'function') {
+          result
+            .then((resolved) => {
+              logger.debug('Handler resolved for type:', type);
+              sendResponse(resolved);
+            })
+            .catch((error) => {
+              logger.error(`Handler ${type} error:`, error);
+              sendResponse({ error: error.message });
+            });
+        } else {
+          logger.debug('Handler resolved synchronously for type:', type);
+          sendResponse(result);
+        }
+      } catch (error) {
+        logger.error(`Handler ${type} error:`, error);
+        sendResponse({ error: error.message });
+      }
       return true;
     }
 
@@ -116,10 +202,17 @@ export function onMessage(handlersOrFn, options = {}) {
     return false;
   }
 
-  chrome.runtime.onMessage.addListener(listener);
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener(listener);
+  } else {
+    logger.warn('chrome.runtime.onMessage is not available');
+  }
+
   return function offMessage() {
     try {
-      chrome.runtime.onMessage.removeListener(listener);
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+        chrome.runtime.onMessage.removeListener(listener);
+      }
     } catch (error) {
       logger.warn('offMessage removeListener failed', error);
     }

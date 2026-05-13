@@ -1,35 +1,50 @@
 import { logger } from '../core/logger.js';
-import { getAuthState, saveAuthSession } from '../core/session.js';
-import { apiService } from '../services/api.js';
+import { getAuthState } from '../core/session.js';
+import { sendToBackground } from '../core/messaging.js';
 
-const authForm = document.getElementById('authForm');
-const roomCodeInput = document.getElementById('roomCode');
-const studentNameInput = document.getElementById('studentName');
-const studentIdInput = document.getElementById('studentId');
-const submitBtn = document.getElementById('submitBtn');
-const errorMessage = document.getElementById('errorMessage');
-const successMessage = document.getElementById('successMessage');
-const connectionStatus = document.getElementById('connectionStatus');
-const statusText = document.getElementById('statusText');
-const btnText = document.querySelector('.btn-text');
-const btnLoading = document.querySelector('.btn-loading');
+let authForm;
+let roomCodeInput;
+let studentNameInput;
+let studentIdInput;
+let submitBtn;
+let errorMessage;
+let successMessage;
+let connectionStatus;
+let statusText;
+let btnText;
+let btnLoading;
+
+function initDOMElements() {
+  authForm = document.getElementById('authForm');
+  roomCodeInput = document.getElementById('roomCode');
+  studentNameInput = document.getElementById('studentName');
+  studentIdInput = document.getElementById('studentId');
+  submitBtn = document.getElementById('submitBtn');
+  errorMessage = document.getElementById('errorMessage');
+  successMessage = document.getElementById('successMessage');
+  connectionStatus = document.getElementById('connectionStatus');
+  statusText = document.getElementById('statusText');
+  btnText = document.querySelector('.btn-text');
+  btnLoading = document.querySelector('.btn-loading');
+}
 
 document.addEventListener('DOMContentLoaded', initPopup);
 
 async function initPopup() {
+  initDOMElements();
   logger.info('Popup initialized');
 
   const saved = await getAuthState();
   if (saved.studentInfo) {
     const { name, msv } = saved.studentInfo;
-    studentNameInput.value = name || '';
-    studentIdInput.value = msv || '';
+    if (studentNameInput) studentNameInput.value = name || '';
+    if (studentIdInput) studentIdInput.value = msv || '';
   }
 
-  authForm.addEventListener('submit', handleFormSubmit);
-  roomCodeInput.addEventListener('input', clearError);
-  studentNameInput.addEventListener('input', clearError);
-  studentIdInput.addEventListener('input', clearError);
+  if (authForm) authForm.addEventListener('submit', handleFormSubmit);
+  if (roomCodeInput) roomCodeInput.addEventListener('input', clearError);
+  if (studentNameInput) studentNameInput.addEventListener('input', clearError);
+  if (studentIdInput) studentIdInput.addEventListener('input', clearError);
 }
 
 async function handleFormSubmit(e) {
@@ -50,52 +65,24 @@ async function handleFormSubmit(e) {
   showConnectionStatus(true);
 
   try {
-    const authResponse = await authenticateRoomCode(roomCode, studentName, studentId);
-
-    await saveAuthSession({
+    const response = await sendToBackground('START_PROCTORING', {
       roomCode,
       studentName,
       studentId,
-      authToken: authResponse.token,
-      sessionId: authResponse.sessionId,
-      serverUrl: authResponse.serverUrl,
-    });
+    }, 20000);
 
-    showSuccess('✓ Đã kết nối server thành công. Chưa bắt đầu giám sát.');
-    setTimeout(() => window.close(), 1500);
+    if (!response || response.ok !== true) {
+      throw new Error(response?.error || 'Không thể bắt đầu giám sát');
+    }
+
+    showSuccess('✓ Đã xác thực và bắt đầu giám sát trên trang thi hiện tại.');
+    setTimeout(() => window.close(), 900);
   } catch (error) {
     logger.error('Authentication error', { message: error.message });
     showError(error.message);
   } finally {
     setLoading(false);
     showConnectionStatus(false);
-  }
-}
-
-async function authenticateRoomCode(roomCode, studentName, studentId) {
-  try {
-    const data = await apiService.authenticateRoomCode(roomCode, studentName, studentId);
-
-    if (!data || !data.token || !data.sessionId) {
-      throw new Error('Invalid server response');
-    }
-
-    return {
-      token: data.token,
-      sessionId: data.sessionId,
-      serverUrl: data.serverUrl || apiService.getServerUrl(),
-    };
-  } catch (error) {
-    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      logger.warn('Server not available, using test mode', error);
-      return {
-        token: `test-${Date.now()}`,
-        sessionId: `session-${Date.now()}`,
-        serverUrl: 'test://local',
-      };
-    }
-
-    throw error;
   }
 }
 
@@ -132,35 +119,49 @@ function validateInputs() {
 }
 
 function showError(message) {
-  errorMessage.textContent = '❌ ' + message;
-  errorMessage.style.display = 'block';
-  successMessage.style.display = 'none';
+  if (errorMessage) {
+    errorMessage.textContent = '❌ ' + message;
+    errorMessage.style.display = 'block';
+  }
+  if (successMessage) successMessage.style.display = 'none';
 }
 
 function showSuccess(message) {
-  successMessage.textContent = message;
-  successMessage.style.display = 'block';
-  errorMessage.style.display = 'none';
+  if (successMessage) {
+    successMessage.textContent = message;
+    successMessage.style.display = 'block';
+  }
+  if (errorMessage) {
+    errorMessage.style.display = 'none';
+  }
 }
 
 function clearError() {
-  errorMessage.style.display = 'none';
+  if (errorMessage) {
+    errorMessage.style.display = 'none';
+  }
 }
 
 function clearMessages() {
-  errorMessage.style.display = 'none';
-  successMessage.style.display = 'none';
+  if (errorMessage) {
+    errorMessage.style.display = 'none';
+  }
+  if (successMessage) {
+    successMessage.style.display = 'none';
+  }
 }
 
 function setLoading(isLoading) {
-  submitBtn.disabled = isLoading;
-  btnText.style.display = isLoading ? 'none' : 'inline';
-  btnLoading.style.display = isLoading ? 'flex' : 'none';
+  if (submitBtn) submitBtn.disabled = isLoading;
+  if (btnText) btnText.style.display = isLoading ? 'none' : 'inline';
+  if (btnLoading) btnLoading.style.display = isLoading ? 'flex' : 'none';
 }
 
 function showConnectionStatus(show) {
-  connectionStatus.style.display = show ? 'flex' : 'none';
-  if (show) {
-    statusText.textContent = 'Đang xác thực và kết nối server...';
+  if (connectionStatus) {
+    connectionStatus.style.display = show ? 'flex' : 'none';
+    if (show && statusText) {
+      statusText.textContent = 'Đang xác thực và kết nối server...';
+    }
   }
 }

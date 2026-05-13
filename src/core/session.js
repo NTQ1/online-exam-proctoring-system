@@ -7,6 +7,7 @@ const AUTH_KEYS = [
   'studentInfo',
   'roomCode',
   'startTime',
+  'proctorSession',
 ];
 
 export async function getAuthState() {
@@ -36,12 +37,22 @@ export async function saveAuthSession({ roomCode, studentName, studentId, authTo
   });
 }
 
+export async function saveProctorSession(proctorSession) {
+  return storage.set({
+    proctorSession: {
+      ...proctorSession,
+    },
+  });
+}
+
 export async function clearAuthSession() {
   return storage.remove([
     'authToken',
     'sessionId',
     'serverUrl',
+    'studentInfo',
     'roomCode',
     'startTime',
+    'proctorSession',
   ]);
 }

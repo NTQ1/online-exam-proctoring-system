@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "description": "Hệ thống giám sát thi cử với phát hiện rời tab, chặn phím tắt, và ghi nhận vi phạm.",
   "permissions": [
+    "activeTab",
+    "scripting",
     "storage",
     "tabs",
     "windows",

@@ -5,6 +5,8 @@
 import { logger } from '../core/logger.js';
 import { SERVER_CONFIG, TIMEOUT_CONFIG } from '../core/config.js';
 
+const VALID_SERVER_PROTOCOLS = new Set(['http:', 'https:']);
+
 class APIService {
   constructor() {
     this.serverUrl = SERVER_CONFIG.development.baseUrl;
@@ -26,7 +28,23 @@ class APIService {
   setServerUrl(serverUrl) {
     if (!serverUrl) return;
 
-    this.serverUrl = serverUrl.endsWith('/api') ? serverUrl.slice(0, -4) : serverUrl;
+    let nextUrl = String(serverUrl).trim();
+
+    try {
+      const parsed = new URL(nextUrl);
+      if (!VALID_SERVER_PROTOCOLS.has(parsed.protocol)) {
+        throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+      }
+      nextUrl = parsed.origin + parsed.pathname;
+    } catch (error) {
+      logger.warn('Ignoring unsupported serverUrl, falling back to development base', {
+        serverUrl: nextUrl,
+        error: error.message,
+      });
+      nextUrl = SERVER_CONFIG.development.baseUrl;
+    }
+
+    this.serverUrl = nextUrl.endsWith('/api') ? nextUrl.slice(0, -4) : nextUrl;
   }
 
   getServerUrl() {
@@ -102,6 +120,19 @@ class APIService {
         timestamp: Date.now(),
       }),
       timeout: TIMEOUT_CONFIG.AUTHENTICATION,
+    });
+  }
+
+  /**
+   * Start proctoring session
+   */
+  async startSession(payload) {
+    return this.request('/sessions/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: this.sessionId,
+        ...payload,
+      }),
     });
   }
 
