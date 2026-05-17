@@ -1,0 +1,101 @@
+#proctor-overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+}
+#proctor-overlay-root .proctor-panel {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  width: 320px;
+  pointer-events: auto;
+  border-radius: 20px;
+  background: rgba(16, 22, 34, 0.94);
+  color: #fff;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  user-select: none;
+}
+#proctor-overlay-root .proctor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #ff8a3d, #ff5f6d);
+  cursor: grab;
+}
+#proctor-overlay-root .proctor-header:active {
+  cursor: grabbing;
+}
+#proctor-overlay-root .proctor-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+#proctor-overlay-root .proctor-badge {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.18);
+}
+#proctor-overlay-root .proctor-body {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+#proctor-overlay-root .proctor-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+#proctor-overlay-root .proctor-label {
+  color: rgba(255,255,255,0.7);
+  flex: 0 0 auto;
+}
+#proctor-overlay-root .proctor-value {
+  text-align: right;
+  font-weight: 600;
+  word-break: break-word;
+}
+#proctor-overlay-root .proctor-timer {
+  margin-top: 2px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.08);
+  text-align: center;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+#proctor-overlay-root .proctor-status {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  text-align: center;
+}
+#proctor-overlay-root .proctor-footer {
+  padding: 0 14px 14px;
+}
+#proctor-overlay-root .proctor-end-btn {
+  width: 100%;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #ff6b4a, #ff8a3d);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#proctor-overlay-root .proctor-error {
+  padding: 12px 14px 0;
+  color: #ffb7b7;
+  font-size: 12px;
+  line-height: 1.5;
+}

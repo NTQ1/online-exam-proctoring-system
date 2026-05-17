@@ -282,6 +282,105 @@ async function handleViolationBatch(req, res) {
   });
 }
 
+async function handleLogViolation(req, res) {
+  const body = await parseBody(req);
+  const { sessionId, type, feature, timestamp, severity, details = {} } = body;
+
+  if (!sessionId || !type) {
+    jsonResponse(res, 400, { ok: false, message: 'sessionId and type are required' });
+    return;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    jsonResponse(res, 404, { ok: false, message: 'Session not found' });
+    return;
+  }
+
+  const violation = {
+    id: createToken('violation'),
+    violationType: type,
+    feature,
+    severity: severity || 'warning',
+    timestamp: timestamp || Date.now(),
+    details,
+  };
+
+  session.violations.push(violation);
+  session.updatedAt = Date.now();
+
+  jsonResponse(res, 200, {
+    ok: true,
+    sessionId,
+    violation,
+    count: session.violations.length,
+  });
+}
+
+async function handleDisconnect(req, res) {
+  const body = await parseBody(req);
+  const { sessionId, tabId, reason, timestamp } = body;
+
+  if (!sessionId) {
+    jsonResponse(res, 400, { ok: false, message: 'sessionId is required' });
+    return;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    jsonResponse(res, 404, { ok: false, message: 'Session not found' });
+    return;
+  }
+
+  session.updatedAt = Date.now();
+
+  jsonResponse(res, 200, {
+    ok: true,
+    sessionId,
+    message: 'Disconnection reported',
+  });
+}
+
+async function handleOfflineLogs(req, res) {
+  const body = await parseBody(req);
+  const { sessionId, logs = [] } = body;
+
+  if (!sessionId) {
+    jsonResponse(res, 400, { ok: false, message: 'sessionId is required' });
+    return;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    jsonResponse(res, 404, { ok: false, message: 'Session not found' });
+    return;
+  }
+
+  const normalized = Array.isArray(logs) ? logs : [];
+  
+  for (const log of normalized) {
+    if (log.type === 'VIOLATION' || log.violationType) {
+      session.violations.push({
+        id: createToken('violation'),
+        violationType: log.type || log.violationType || 'UNKNOWN',
+        timestamp: log.timestamp || Date.now(),
+        details: log.details || {},
+      });
+    } else if (log.type === 'HEARTBEAT') {
+      session.heartbeats.push(log.timestamp || Date.now());
+    }
+  }
+
+  session.updatedAt = Date.now();
+
+  jsonResponse(res, 200, {
+    ok: true,
+    sessionId,
+    inserted: normalized.length,
+    message: 'Offline logs synced',
+  });
+}
+
 function handleGetSession(req, res, sessionId) {
   const session = sessions.get(sessionId);
   if (!session) {
@@ -364,6 +463,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && pathname === '/api/violations') {
+      await handleLogViolation(req, res);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/session/disconnect') {
+      await handleDisconnect(req, res);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/offline-logs') {
+      await handleOfflineLogs(req, res);
+      return;
+    }
+
     if (req.method === 'GET' && pathname.startsWith('/api/sessions/')) {
       const sessionId = pathname.split('/').pop();
       handleGetSession(req, res, sessionId);
@@ -389,6 +503,9 @@ server.listen(PORT, HOST, () => {
   console.log('  POST /api/sessions/heartbeat');
   console.log('  POST /api/violations/report');
   console.log('  POST /api/violations/batch');
+  console.log('  POST /api/violations');
+  console.log('  POST /api/session/disconnect');
+  console.log('  POST /api/offline-logs');
   console.log('  GET  /api/sessions/:sessionId');
 });
 

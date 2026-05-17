@@ -2,6 +2,8 @@ import { logger } from './core/logger.js';
 import { clearAuthSession, getAuthState, saveAuthSession, saveProctorSession } from './core/session.js';
 import { onMessage, sendToTab } from './core/messaging.js';
 import { apiService } from './services/api.js';
+import { handleHeartbeat, initHeartbeatSession, startHeartbeatMonitoring, stopHeartbeatMonitoring, clearAllHeartbeatData } from './features/heartbeat-monitor.js';
+import { addToOfflineQueue, flushOfflineQueue } from './features/offline-queue.js';
 
 /**
  * BACKGROUND ↔ CONTENT MESSAGE PROTOCOL (Standardized)
@@ -180,6 +182,16 @@ async function processStartProctoring({ roomCode, studentName, studentId, authRe
     await injectOverlay(tab.id);
     logger.info('processStartProctoring: Overlay injected successfully');
 
+    logger.info('processStartProctoring: Starting heartbeat monitoring');
+    initHeartbeatSession(session.sessionId, tab.id); // seed lastHeartbeat ngay khi tạo session
+    startHeartbeatMonitoring();
+    logger.info('processStartProctoring: Heartbeat monitoring started');
+
+    logger.info('processStartProctoring: Requesting fullscreen for tab', tab.id);
+    await requestTabFullscreen(tab.id).catch((error) => {
+      logger.warn('Failed to request fullscreen', error.message);
+    });
+
     return session;
   } catch (error) {
     logger.error('Start proctoring failed', error);
@@ -210,7 +222,39 @@ async function processStartProctoring({ roomCode, studentName, studentId, authRe
 }
 
 async function handleEndProctoring(data, sender) {
-  const session = runtimeState.session;
+  // Try runtimeState first
+  let session = runtimeState.session;
+
+  // Bug 2 fix: Service worker may have been killed and restarted (state lost).
+  // Attempt to restore session from chrome.storage before giving up.
+  // NOTE: session.js stores data under individual keys, not a single 'auth_session' key.
+  // Use getAuthState() which reads 'proctorSession' (and other keys) correctly.
+  if (!session?.sessionId) {
+    try {
+      const stored = await getAuthState();
+      const storedSession = stored?.proctorSession;
+      if (storedSession?.sessionId) {
+        logger.info('handleEndProctoring: Restoring session from storage after SW restart');
+        runtimeState.session = storedSession;
+        runtimeState.status = 'active';
+        runtimeState.activeTabId = storedSession.activeTabId || sender?.tab?.id || null;
+        runtimeState.activeWindowId = storedSession.activeWindowId || null;
+        session = storedSession;
+
+        // Also restore API context so endSession() can reach the backend
+        if (storedSession.authToken && storedSession.sessionId) {
+          apiService.setContext({
+            serverUrl: storedSession.serverUrl,
+            token: storedSession.authToken,
+            sessionId: storedSession.sessionId,
+          });
+        }
+      }
+    } catch (storageError) {
+      logger.warn('handleEndProctoring: Failed to restore session from storage', storageError.message);
+    }
+  }
+
   if (!session?.sessionId) {
     logger.warn('handleEndProctoring called without active session');
     return {
@@ -220,7 +264,12 @@ async function handleEndProctoring(data, sender) {
     };
   }
 
-  logger.info('handleEndProctoring called, returning immediate ack');
+  logger.info('handleEndProctoring called', {
+    hasRuntimeSession: !!runtimeState.session,
+    runtimeStatus: runtimeState.status,
+    activeTabId: runtimeState.activeTabId,
+    restoredFromStorage: session !== runtimeState.session, // true nếu session được lấy từ storage
+  });
   runtimeState.status = 'ending';
 
   try {
@@ -276,6 +325,8 @@ async function processEndProctoring({ data, sender, session }) {
     });
   }
 
+  await exitTabFullscreen(windowId);
+
   await cleanupRuntime();
 
   logger.info('END_PROCTORING completed successfully');
@@ -321,6 +372,13 @@ async function isStoredSessionStale(session) {
 async function forceResetSession(reason = 'force_reset') {
   const session = runtimeState.session;
 
+  logger.warn('forceResetSession called', {
+    reason,
+    sessionId: session?.sessionId,
+    status: runtimeState.status,
+    activeTabId: runtimeState.activeTabId,
+  });
+
   if (session?.sessionId) {
     await apiService.endSession({
       endedAt: Date.now(),
@@ -343,6 +401,8 @@ async function forceResetSession(reason = 'force_reset') {
     });
   }
 
+  await exitTabFullscreen(session?.activeWindowId || runtimeState.activeWindowId);
+
   await cleanupRuntime();
 }
 
@@ -351,15 +411,38 @@ async function removeOverlayDirectly(tabId) {
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    func: (rootId, styleId) => {
+    func: (rootId) => {
       const root = document.getElementById(rootId);
       if (root) root.remove();
-
-      const style = document.getElementById(styleId);
-      if (style) style.remove();
     },
-    args: [OVERLAY_ROOT_ID, OVERLAY_STYLE_ID],
+    args: [OVERLAY_ROOT_ID],
   });
+
+  // Remove injected CSS
+  await chrome.scripting.removeCSS({
+    target: { tabId },
+    files: ['src/overlay.css'],
+  }).catch(() => {});
+
+  // Cleanup features in MAIN world
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: () => {
+      try {
+        if (window.__features) {
+          window.__features.blockActions?.cleanup?.();
+          window.__features.tabSwitch?.cleanup?.();
+          window.__features.fullscreen?.cleanup?.();
+          window.__features.devtools?.cleanup?.();
+          window.__features.heartbeat?.cleanup?.();
+          delete window.__features;
+        }
+        delete window.__proctoringSession;
+        delete window.logger;
+      } catch (e) {}
+    },
+  }).catch(() => {});
 }
 
 function handleGetSessionInfo() {
@@ -378,6 +461,104 @@ function handleGetSessionInfo() {
     status: runtimeState.status,
     session: runtimeState.session,
   };
+}
+
+/**
+ * FR-15: Handle HEARTBEAT from content script
+ */
+function handleHeartbeatMessage(data) {
+  try {
+    if (!data?.sessionId) {
+      logger.warn('Heartbeat received without sessionId');
+      return { ok: false, error: 'No sessionId' };
+    }
+
+    handleHeartbeat(data);
+    logger.debug('Heartbeat processed for session', data.sessionId);
+    return { ok: true };
+  } catch (error) {
+    logger.error('Failed to handle heartbeat', error.message);
+    return { ok: false, error: error.message };
+  }
+}
+
+/**
+ * Handle REMOVE_OVERLAY_CSS from content script (sent when overlay self-removes)
+ */
+async function handleRemoveOverlayCSS(data, sender) {
+  const tabId = sender?.tab?.id ?? runtimeState.activeTabId;
+  if (typeof tabId !== 'number') return { ok: false };
+
+  await chrome.scripting.removeCSS({
+    target: { tabId },
+    files: ['src/overlay.css'],
+  }).catch(() => {});
+
+  // Cleanup features in MAIN world
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'MAIN',
+    func: () => {
+      try {
+        if (window.__features) {
+          window.__features.blockActions?.cleanup?.();
+          window.__features.tabSwitch?.cleanup?.();
+          window.__features.fullscreen?.cleanup?.();
+          window.__features.devtools?.cleanup?.();
+          window.__features.heartbeat?.cleanup?.();
+          delete window.__features;
+        }
+        delete window.__proctoringSession;
+        delete window.logger;
+      } catch (e) {}
+    },
+  }).catch(() => {});
+
+  return { ok: true };
+}
+
+/**
+ * FR-11 đến FR-14: Handle LOG_VIOLATION from content script
+ */
+async function handleLogViolation(data) {
+  try {
+    if (!data?.type || !runtimeState.session) {
+      logger.warn('LOG_VIOLATION received with invalid data', { hasType: !!data?.type, hasSession: !!runtimeState.session });
+      return { ok: false, error: 'Invalid violation data' };
+    }
+
+    const violationData = {
+      sessionId: runtimeState.session.sessionId,
+      type: data.type,
+      severity: data.severity || 'warning',
+      feature: data.feature,
+      timestamp: data.timestamp || Date.now(),
+      details: data.details || {},
+    };
+
+    logger.warn('Violation logged', { type: data.type, feature: data.feature });
+
+    // Gửi ngay lên backend
+    try {
+      await apiService.logViolation(violationData);
+      return { ok: true };
+    } catch (error) {
+      logger.error('Failed to send violation to backend', error.message);
+
+      // Thêm vào offline queue nếu backend offline
+      await addToOfflineQueue(runtimeState.session.sessionId, {
+        type: 'VIOLATION',
+        ...violationData,
+      }).catch((queueError) => {
+        logger.error('Failed to add violation to offline queue', queueError.message);
+      });
+
+      return { ok: false, error: error.message };
+    }
+  } catch (error) {
+    logger.error('Error in handleLogViolation', error.message);
+    return { ok: false, error: error.message };
+  }
 }
 
 async function authenticateRoomCode(roomCode, studentName, studentId) {
@@ -449,10 +630,132 @@ function getClientMetadata() {
 }
 
 async function injectOverlay(tabId) {
+  const extensionBaseUrl = chrome.runtime.getURL('');
+  const session = runtimeState.session;
+
+  // Inject CSS bypassing CSP
+  await chrome.scripting.insertCSS({
+    target: { tabId },
+    files: ['src/overlay.css']
+  });
+
+  // Inject feature modules into the MAIN world safely (no inline scripts)
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ['src/content.js'],
+    world: 'MAIN',
+    args: [extensionBaseUrl, session.sessionId, session.activeTabId, chrome.runtime.id],
+    func: async (baseUrl, sessionId, activeTabId, extId) => {
+      try {
+        if (sessionId) {
+          window.__proctoringSession = { sessionId, tabId: activeTabId };
+        }
+
+          window.__extSendMessage = function(message, callback) {
+          try {
+            chrome.runtime.sendMessage(
+              extId,    // explicit extensionId — required when called from non-extension context
+              message,
+              callback || function() { chrome.runtime.lastError; }
+            );
+          } catch (err) {
+            // Silently ignore if runtime is unavailable
+          }
+        };
+
+        const moduleURLs = {
+          logger: baseUrl + 'src/core/logger.js',
+          blockActions: baseUrl + 'src/features/block-actions.js',
+          tabSwitch: baseUrl + 'src/features/tab-switch-detector.js',
+          fullscreen: baseUrl + 'src/features/fullscreen-monitor.js',
+          devtools: baseUrl + 'src/features/devtools-detector.js',
+          heartbeat: baseUrl + 'src/features/heartbeat.js',
+        };
+
+        const loggerModule = await import(moduleURLs.logger);
+        window.logger = loggerModule.logger;
+
+        const [
+          blockActionsModule,
+          tabSwitchModule,
+          fullscreenModule,
+          devtoolsModule,
+          heartbeatModule
+        ] = await Promise.all([
+          import(moduleURLs.blockActions),
+          import(moduleURLs.tabSwitch),
+          import(moduleURLs.fullscreen),
+          import(moduleURLs.devtools),
+          import(moduleURLs.heartbeat)
+        ]);
+
+        window.__features = {
+          blockActions: {
+            init: blockActionsModule.initBlockActions,
+            cleanup: blockActionsModule.cleanupBlockActions,
+            getCount: blockActionsModule.getBlockActionsCount,
+            reset: blockActionsModule.resetBlockActionsCount,
+          },
+          tabSwitch: {
+            init: tabSwitchModule.initTabSwitchDetector,
+            cleanup: tabSwitchModule.cleanupTabSwitchDetector,
+            getStats: tabSwitchModule.getAwayStats,
+          },
+          fullscreen: {
+            init: fullscreenModule.initFullscreenMonitor,
+            cleanup: fullscreenModule.cleanupFullscreenMonitor,
+            getStats: fullscreenModule.getFullscreenStats,
+          },
+          devtools: {
+            init: devtoolsModule.initDevtoolsDetector,
+            cleanup: devtoolsModule.cleanupDevtoolsDetector,
+            getStats: devtoolsModule.getDevtoolsStats,
+          },
+          heartbeat: {
+            init: heartbeatModule.initHeartbeat,
+            cleanup: heartbeatModule.cleanupHeartbeat,
+          },
+        };
+
+        window.__features.blockActions.init();
+        window.__features.tabSwitch.init();
+        window.__features.fullscreen.init();
+        window.__features.devtools.init();
+        window.__features.heartbeat.init();
+        
+      } catch (error) {
+        console.error('[Proctor] Failed to load modules via executeScript:', error);
+      }
+    }
   });
+
+  // Inject content.js safely into ISOLATED world (no interaction with MAIN needed now)
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['src/content.js']
+  });
+
+  logger.info('Overlay and feature modules injected safely into tab', tabId);
+}
+
+async function requestTabFullscreen(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.windows.update(tab.windowId, { state: 'fullscreen' });
+    logger.info('Window fullscreen activated for tab', tabId);
+  } catch (error) {
+    logger.warn('Failed to set window fullscreen', error.message);
+  }
+}
+
+async function exitTabFullscreen(windowId) {
+  try {
+    if (typeof windowId === 'number') {
+      await chrome.windows.update(windowId, { state: 'maximized' });
+      logger.info('Window fullscreen deactivated for window', windowId);
+    }
+  } catch (error) {
+    logger.warn('Failed to exit window fullscreen', error.message);
+  }
 }
 
 async function captureFinalScreenshot(windowId) {
@@ -473,8 +776,30 @@ async function captureFinalScreenshot(windowId) {
 }
 
 async function cleanupRuntime() {
+  logger.warn('cleanupRuntime called', {
+    status: runtimeState.status,
+    sessionId: runtimeState.session?.sessionId,
+    activeTabId: runtimeState.activeTabId,
+    activeWindowId: runtimeState.activeWindowId,
+    stack: new Error().stack.split('\n').slice(1, 4).join(' | '), // call stack (3 frames)
+  });
+
   runtimeState.status = 'ended';
-  
+
+  logger.info('cleanupRuntime: Stopping heartbeat monitoring');
+  stopHeartbeatMonitoring();
+  clearAllHeartbeatData();
+
+  // Remove injected CSS from the proctored tab
+  if (typeof runtimeState.activeTabId === 'number') {
+    await chrome.scripting.removeCSS({
+      target: { tabId: runtimeState.activeTabId },
+      files: ['src/overlay.css'],
+    }).catch((err) => {
+      logger.warn('cleanupRuntime: removeCSS failed', err.message);
+    });
+  }
+
   // Notify content script of cleanup so it can dispose its state
   if (typeof runtimeState.activeTabId === 'number') {
     try {
@@ -484,13 +809,15 @@ async function cleanupRuntime() {
       logger.warn('Failed to send cleanup signal to content', error.message);
     }
   }
-  
+
   runtimeState.session = null;
   runtimeState.activeTabId = null;
   runtimeState.activeWindowId = null;
   await clearAuthSession().catch((error) => {
     logger.warn('cleanupRuntime clearAuthSession failed', error.message);
   });
+
+  logger.info('cleanupRuntime complete');
 }
 
 function initializeBackground() {
@@ -513,6 +840,9 @@ onMessage({
   START_PROCTORING: handleStartProctoring,
   END_PROCTORING: handleEndProctoring,
   GET_SESSION_INFO: handleGetSessionInfo,
+  HEARTBEAT: handleHeartbeatMessage,
+  LOG_VIOLATION: handleLogViolation,
+  REMOVE_OVERLAY_CSS: handleRemoveOverlayCSS,
 });
 
 // Initialize service worker

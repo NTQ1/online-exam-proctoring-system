@@ -13,7 +13,6 @@ function formatLog(level, message, data) {
 }
 
 const ROOT_ID = 'proctor-overlay-root';
-const STYLE_ID = 'proctor-overlay-style';
 const DEFAULT_TIMEOUT = 5000;
 const STATE_KEY = '__proctorContentState__';
 
@@ -58,7 +57,13 @@ function getContentState() {
  * - SESSION_CLEANUP: Signal content to dispose its state (backend ended session)
  *   Message: { type: 'SESSION_CLEANUP', data: { reason } }
  *   Response: { ok: true }
+ * 
+ * - ENTER_FULLSCREEN: Signal content to enter fullscreen mode
+ *   Message: { type: 'ENTER_FULLSCREEN', data: null }
+ *   Response: { ok: true }
  */
+
+// monitoring features initialization is now handled securely in background.js
 
 bootstrap();
 
@@ -79,14 +84,20 @@ async function bootstrap() {
       sessionInfo = response.session;
       renderSession(response.session);
       startTimer(response.session.startedAt);
+
       logger.debug('Bootstrap complete with session', response.session.sessionId);
       return;
     }
 
-    showStatus(response?.error || 'Không tìm thấy phiên giám sát');
+    // Background báo không có session — tự dọn overlay tránh treo giao diện.
+    logger.warn('Bootstrap: no active session from background, removing overlay', {
+      responseOk: response?.ok,
+      error: response?.error,
+    });
+    removeOverlay();
   } catch (error) {
     logger.error('Bootstrap failed', error.message);
-    showStatus(error.message);
+    removeOverlay();
   }
 }
 
@@ -162,143 +173,94 @@ function ensureOverlay() {
     return;
   }
 
-  const style = document.createElement('style');
-  style.id = STYLE_ID;
-  style.textContent = `
-    #${ROOT_ID} {
-      position: fixed;
-      inset: 0;
-      z-index: 2147483647;
-      pointer-events: none;
-      font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
-    }
-    #${ROOT_ID} .proctor-panel {
-      position: fixed;
-      top: 24px;
-      left: 24px;
-      width: 320px;
-      pointer-events: auto;
-      border-radius: 20px;
-      background: rgba(16, 22, 34, 0.94);
-      color: #fff;
-      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      backdrop-filter: blur(14px);
-      user-select: none;
-    }
-    #${ROOT_ID} .proctor-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 14px;
-      background: linear-gradient(135deg, #ff8a3d, #ff5f6d);
-      cursor: grab;
-    }
-    #${ROOT_ID} .proctor-header:active {
-      cursor: grabbing;
-    }
-    #${ROOT_ID} .proctor-title {
-      font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-    }
-    #${ROOT_ID} .proctor-badge {
-      font-size: 11px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.18);
-    }
-    #${ROOT_ID} .proctor-body {
-      padding: 14px;
-      display: grid;
-      gap: 10px;
-    }
-    #${ROOT_ID} .proctor-line {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    #${ROOT_ID} .proctor-label {
-      color: rgba(255,255,255,0.7);
-      flex: 0 0 auto;
-    }
-    #${ROOT_ID} .proctor-value {
-      text-align: right;
-      font-weight: 600;
-      word-break: break-word;
-    }
-    #${ROOT_ID} .proctor-timer {
-      margin-top: 2px;
-      padding: 12px;
-      border-radius: 16px;
-      background: rgba(255,255,255,0.08);
-      text-align: center;
-      font-size: 28px;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-    }
-    #${ROOT_ID} .proctor-status {
-      font-size: 12px;
-      color: rgba(255,255,255,0.7);
-      text-align: center;
-    }
-    #${ROOT_ID} .proctor-footer {
-      padding: 0 14px 14px;
-    }
-    #${ROOT_ID} .proctor-end-btn {
-      width: 100%;
-      border: none;
-      border-radius: 14px;
-      padding: 12px 14px;
-      background: linear-gradient(135deg, #ff6b4a, #ff8a3d);
-      color: #fff;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    #${ROOT_ID} .proctor-error {
-      padding: 12px 14px 0;
-      color: #ffb7b7;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-  `;
-
   rootEl = document.createElement('div');
   rootEl.id = ROOT_ID;
-  rootEl.innerHTML = `
-    <div class="proctor-panel" data-role="panel">
-      <div class="proctor-header" data-role="drag-handle">
-        <div class="proctor-title">Giám sát thi</div>
-        <div class="proctor-badge">LIVE</div>
-      </div>
-      <div class="proctor-body">
-        <div class="proctor-line"><span class="proctor-label">Họ và tên</span><span class="proctor-value" data-field="studentName">--</span></div>
-        <div class="proctor-line"><span class="proctor-label">MSV</span><span class="proctor-value" data-field="studentId">--</span></div>
-        <div class="proctor-line"><span class="proctor-label">Phòng thi</span><span class="proctor-value" data-field="roomCode">--</span></div>
-        <div class="proctor-timer" data-field="timer">00:00:00</div>
-        <div class="proctor-status" data-field="status">Đang khởi tạo phiên...</div>
-      </div>
-      <div class="proctor-footer">
-        <button class="proctor-end-btn" type="button" data-role="end-button">Kết thúc</button>
-      </div>
-      <div class="proctor-error" data-field="error" hidden></div>
-    </div>
-  `;
 
-  document.documentElement.appendChild(style);
+  const panel = document.createElement('div');
+  panel.className = 'proctor-panel';
+  panel.dataset.role = 'panel';
+
+  const header = document.createElement('div');
+  header.className = 'proctor-header';
+  header.dataset.role = 'drag-handle';
+
+  const title = document.createElement('div');
+  title.className = 'proctor-title';
+  title.textContent = 'Giám sát thi';
+
+  const badge = document.createElement('div');
+  badge.className = 'proctor-badge';
+  badge.textContent = 'LIVE';
+
+  header.appendChild(title);
+  header.appendChild(badge);
+
+  const body = document.createElement('div');
+  body.className = 'proctor-body';
+
+  const createLine = (label, fieldId, defaultVal) => {
+    const line = document.createElement('div');
+    line.className = 'proctor-line';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'proctor-label';
+    labelSpan.textContent = label;
+
+    const valueSpan = document.createElement('span');
+    valueSpan.className = 'proctor-value';
+    valueSpan.dataset.field = fieldId;
+    valueSpan.textContent = defaultVal;
+
+    line.appendChild(labelSpan);
+    line.appendChild(valueSpan);
+    return line;
+  };
+
+  body.appendChild(createLine('Họ và tên', 'studentName', '--'));
+  body.appendChild(createLine('MSV', 'studentId', '--'));
+  body.appendChild(createLine('Phòng thi', 'roomCode', '--'));
+
+  const timer = document.createElement('div');
+  timer.className = 'proctor-timer';
+  timer.dataset.field = 'timer';
+  timer.textContent = '00:00:00';
+
+  const status = document.createElement('div');
+  status.className = 'proctor-status';
+  status.dataset.field = 'status';
+  status.textContent = 'Đang khởi tạo phiên...';
+
+  body.appendChild(timer);
+  body.appendChild(status);
+
+  const footer = document.createElement('div');
+  footer.className = 'proctor-footer';
+
+  const endBtn = document.createElement('button');
+  endBtn.className = 'proctor-end-btn';
+  endBtn.type = 'button';
+  endBtn.dataset.role = 'end-button';
+  endBtn.textContent = 'Kết thúc';
+
+  footer.appendChild(endBtn);
+
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'proctor-error';
+  errorDiv.dataset.field = 'error';
+  errorDiv.hidden = true;
+
+  panel.appendChild(header);
+  panel.appendChild(body);
+  panel.appendChild(footer);
+  panel.appendChild(errorDiv);
+
+  rootEl.appendChild(panel);
   document.documentElement.appendChild(rootEl);
-  panelEl = rootEl.querySelector('[data-role="panel"]');
+  
+  panelEl = panel;
 
-  const endButton = rootEl.querySelector('[data-role="end-button"]');
-  const dragHandle = rootEl.querySelector('[data-role="drag-handle"]');
-
-  endButton.addEventListener('click', handleEndClick);
-  wireDrag(dragHandle, panelEl);
+  endBtn.addEventListener('click', handleEndClick);
+  wireDrag(header, panelEl);
 }
 
 function attachMessageListener() {
@@ -338,6 +300,8 @@ function attachMessageListener() {
       sendResponse({ ok: true });
       return true;
     }
+
+    // Handler ENTER_FULLSCREEN đã bị loại bỏ vì background dùng chrome.windows.update để fullscreen
 
     logger.debug('Content no handler for message type:', type);
     return false;
@@ -522,14 +486,10 @@ function removeOverlay() {
     panelEl = null;
   }
 
-  const style = document.getElementById(STYLE_ID);
-  if (style) {
-    try {
-      style.remove();
-    } catch (error) {
-      logger.warn('Failed to remove style', error.message);
-    }
-  }
+  // Signal background to cleanup injected CSS and features
+  try {
+    chrome.runtime.sendMessage({ type: 'REMOVE_OVERLAY_CSS', data: null });
+  } catch (_) {}
 
   isCleaningUp = false;
   disposeContentScript();

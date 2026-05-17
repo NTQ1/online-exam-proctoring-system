@@ -21,5 +21,19 @@
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/core/logger.js",
+        "src/features/block-actions.js",
+        "src/features/tab-switch-detector.js",
+        "src/features/fullscreen-monitor.js",
+        "src/features/devtools-detector.js",
+        "src/features/heartbeat.js",
+        "src/content.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

@@ -215,6 +215,55 @@ class APIService {
       }),
     });
   }
+
+  /**
+   * Log violation với format chuẩn từ proctoring system
+   * @param {Object} violationData - { sessionId, type, timestamp, severity, details }
+   */
+  async logViolation(violationData) {
+    return this.request('/violations', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...violationData,
+        sessionId: violationData.sessionId || this.sessionId,
+      }),
+    });
+  }
+
+  /**
+   * Báo cáo mất kết nối
+   * @param {Object} data - { sessionId, tabId, reason, timestamp }
+   */
+  async reportDisconnection(data) {
+    return this.request('/session/disconnect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Gửi offline logs khi kết nối phục hồi
+   * @param {Object} data - { sessionId, logs, disconnectedAt, reconnectedAt, totalOfflineDuration }
+   */
+  async flushOfflineLogs(data) {
+    return this.request('/offline-logs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Health check backend
+   */
+  async healthCheck() {
+    try {
+      const response = await this.request('/health', { method: 'GET' });
+      return response?.ok === true;
+    } catch (error) {
+      logger.debug('Health check failed', error.message);
+      return false;
+    }
+  }
 }
 
 // Export singleton instance
