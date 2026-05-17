@@ -9,7 +9,8 @@
     "storage",
     "tabs",
     "windows",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -22,6 +23,9 @@
     "service_worker": "src/background.js",
     "type": "module"
   },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "web_accessible_resources": [
     {
       "resources": [
@@ -31,7 +35,22 @@
         "src/features/fullscreen-monitor.js",
         "src/features/devtools-detector.js",
         "src/features/heartbeat.js",
-        "src/content.js"
+        "src/features/camera-monitor.js",
+        "src/content.js",
+        "src/services/AI/model.json",
+        "src/services/AI/group1-shard1of3.bin",
+        "src/services/AI/group1-shard2of3.bin",
+        "src/services/AI/group1-shard3of3.bin",
+        "src/lib/tf-core.min.js",
+        "src/lib/tf-converter.min.js",
+        "src/lib/tf-backend-cpu.min.js"
+      ],
+      "matches": ["<all_urls>"]
+    },
+    {
+      "resources": [
+        "src/offscreen/offscreen.html",
+        "src/offscreen/offscreen.js"
       ],
       "matches": ["<all_urls>"]
     }

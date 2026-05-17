@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Inference Worker</title>
+</head>
+<body>
+  <canvas id="inference-canvas" width="416" height="416" style="display:none;"></canvas>
+  <!--
+    CPU backend: không có Web Worker, không blob URL, không eval().
+    Hoàn toàn tương thích MV3 CSP. Đủ nhanh cho inference 1fps.
+    Thứ tự load: core → cpu-backend → converter → logic
+  -->
+  <script src="../lib/tf-core.min.js"></script>
+  <script src="../lib/tf-backend-cpu.min.js"></script>
+  <script src="../lib/tf-converter.min.js"></script>
+  <script src="offscreen.js"></script>
+</body>
+</html>

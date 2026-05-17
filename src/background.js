@@ -424,6 +424,12 @@ async function removeOverlayDirectly(tabId) {
     files: ['src/overlay.css'],
   }).catch(() => {});
 
+  // Cleanup camera monitor in ISOLATED world (default)
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => { try { window.__cameraMonitor?.stop?.(); } catch(e) {} },
+  }).catch(() => {});
+
   // Cleanup features in MAIN world
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -439,6 +445,7 @@ async function removeOverlayDirectly(tabId) {
           delete window.__features;
         }
         delete window.__proctoringSession;
+        delete window.__extSendMessage;
         delete window.logger;
       } catch (e) {}
     },
@@ -494,6 +501,12 @@ async function handleRemoveOverlayCSS(data, sender) {
     files: ['src/overlay.css'],
   }).catch(() => {});
 
+  // Cleanup camera monitor in ISOLATED world (default)
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => { try { window.__cameraMonitor?.stop?.(); } catch(e) {} },
+  }).catch(() => {});
+
   // Cleanup features in MAIN world
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -509,6 +522,7 @@ async function handleRemoveOverlayCSS(data, sender) {
           delete window.__features;
         }
         delete window.__proctoringSession;
+        delete window.__extSendMessage;
         delete window.logger;
       } catch (e) {}
     },
@@ -633,6 +647,14 @@ async function injectOverlay(tabId) {
   const extensionBaseUrl = chrome.runtime.getURL('');
   const session = runtimeState.session;
 
+  // Đảm bảo Offscreen Document và model sẵn sàng TRƯỚC khi inject camera-monitor
+  try {
+    await ensureOffscreenDocument();
+    logger.info('[AI-BG] Offscreen document ready for tab', tabId);
+  } catch (err) {
+    logger.warn('[AI-BG] Could not ensure offscreen document:', err.message);
+  }
+
   // Inject CSS bypassing CSP
   await chrome.scripting.insertCSS({
     target: { tabId },
@@ -734,7 +756,15 @@ async function injectOverlay(tabId) {
     files: ['src/content.js']
   });
 
-  logger.info('Overlay and feature modules injected safely into tab', tabId);
+  // Inject camera-monitor vào ISOLATED world (default) — chrome.runtime.sendMessage hoạt động trực tiếp
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['src/features/camera-monitor.js'],
+  }).catch(err => {
+    logger.warn('[AI-BG] camera-monitor injection failed (non-fatal):', err.message);
+  });
+
+  logger.info('Overlay, feature modules, and camera monitor injected into tab', tabId);
 }
 
 async function requestTabFullscreen(tabId) {
@@ -802,11 +832,17 @@ async function cleanupRuntime() {
 
   // Notify content script of cleanup so it can dispose its state
   if (typeof runtimeState.activeTabId === 'number') {
+    const tabId = runtimeState.activeTabId; // lưu lại trước khi clear
     try {
-      await sendToTab(runtimeState.activeTabId, 'SESSION_CLEANUP', { reason: 'backend_ended_or_timeout' });
+      await sendToTab(tabId, 'SESSION_CLEANUP', { reason: 'backend_ended_or_timeout' });
       logger.debug('Sent SESSION_CLEANUP signal to content script');
     } catch (error) {
-      logger.warn('Failed to send cleanup signal to content', error.message);
+      logger.warn('Failed to send cleanup signal to content, trying executeScript fallback:', error.message);
+      // Fallback: gọi trực tiếp qua executeScript nếu sendToTab thất bại
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => { try { window.__cameraMonitor?.stop?.(); } catch (_) {} },
+      }).catch(() => {});
     }
   }
 
@@ -817,7 +853,166 @@ async function cleanupRuntime() {
     logger.warn('cleanupRuntime clearAuthSession failed', error.message);
   });
 
+  // Đợi camera-monitor kịp nhận 'Session ended' và dừng interval
+  // trước khi đóng offscreen document (tránh 'Receiving end does not exist')
+  await new Promise(resolve => setTimeout(resolve, 1200));
+
+  // Đóng Offscreen Document sau khi session kết thúc
+  await closeOffscreenDocument().catch(err => {
+    logger.debug('cleanupRuntime closeOffscreen (non-fatal):', err.message);
+  });
+
   logger.info('cleanupRuntime complete');
+}
+
+// ─── AI / Offscreen Document Management ────────────────────────────────────
+
+const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
+let offscreenCreating = false;
+
+/**
+ * Đảm bảo Offscreen Document đang tồn tại.
+ * MV3 chỉ cho phép 1 offscreen document tại một thời điểm.
+ */
+async function ensureOffscreenDocument() {
+  // Chrome 116+ có existingContexts API
+  if (chrome.runtime.getContexts) {
+    const existing = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)],
+    });
+    if (existing.length > 0) {
+      logger.debug('Offscreen document already exists');
+      return;
+    }
+  }
+
+  if (offscreenCreating) {
+    // Đợi lần tạo đang diễn ra
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return;
+  }
+
+  offscreenCreating = true;
+  try {
+    await chrome.offscreen.createDocument({
+      url:     OFFSCREEN_URL,
+      reasons: [
+        // DOM_SCRAPING: cần canvas/DOM để TF.js vẽ tensor và xử lý ảnh
+        chrome.offscreen.Reason.DOM_SCRAPING,
+      ],
+      justification: 'Run YOLO TF.js inference for AI cheating detection (canvas + WebGL)',
+    });
+    logger.info('[AI-BG] Offscreen document created');
+  } catch (err) {
+    // "Only a single offscreen document" — document already exists
+    if (!err.message?.includes('single offscreen')) {
+      logger.error('[AI-BG] Failed to create offscreen document:', err.message);
+      throw err;
+    }
+    logger.debug('[AI-BG] Offscreen document already exists (caught on create)');
+  } finally {
+    offscreenCreating = false;
+  }
+}
+
+/**
+ * Xóa Offscreen Document khi kết thúc giám sát.
+ */
+async function closeOffscreenDocument() {
+  try {
+    await chrome.offscreen.closeDocument();
+    logger.info('[AI-BG] Offscreen document closed');
+  } catch (err) {
+    // Không có offscreen đang tồn tại — bỏ qua
+    logger.debug('[AI-BG] closeOffscreenDocument (already closed):', err.message);
+  }
+}
+
+/**
+ * Handler: AI_ENSURE_OFFSCREEN — từ camera-monitor.js content script
+ */
+async function handleEnsureOffscreen() {
+  try {
+    await ensureOffscreenDocument();
+    // Yêu cầu offscreen pre-load model
+    chrome.runtime.sendMessage({ type: 'AI_INIT_MODEL' }, (res) => {
+      if (chrome.runtime.lastError) {
+        logger.warn('[AI-BG] AI_INIT_MODEL error:', chrome.runtime.lastError.message);
+      } else {
+        logger.info('[AI-BG] Model init response:', res?.status);
+      }
+    });
+    return { ok: true };
+  } catch (err) {
+    logger.error('[AI-BG] handleEnsureOffscreen failed:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Handler: AI_FRAME — frame từ camera-monitor.js
+ * Chuyển tiếp đến Offscreen Document để inference.
+ */
+async function handleAIFrame(data) {
+  // Guard: session đã kết thúc → không cố forward đến offscreen đã bị đóng
+  if (runtimeState.status !== 'active') {
+    return { ok: false, error: 'Session ended', detections: [] };
+  }
+
+  try {
+    await ensureOffscreenDocument();
+
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          type:      'AI_INFERENCE',
+          imageData: data.imageData,
+          width:     data.width,
+          height:    data.height,
+          frameId:   data.frameId,
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            logger.warn('[AI-BG] AI_INFERENCE relay error:', chrome.runtime.lastError.message);
+            resolve({ ok: false, error: chrome.runtime.lastError.message, detections: [] });
+          } else {
+            resolve(result || { ok: false, detections: [] });
+          }
+        }
+      );
+    });
+  } catch (err) {
+    logger.error('[AI-BG] handleAIFrame error:', err.message);
+    return { ok: false, error: err.message, detections: [] };
+  }
+}
+
+/**
+ * Handler: AI_VIOLATION — khi camera-monitor phát hiện vi phạm nghiêm trọng
+ * Gửi lên backend kèm ảnh chụp.
+ */
+async function handleAIViolation(data) {
+  const { detections = [], imageDataUrl, timestamp } = data;
+
+  logger.warn('[AI-BG] 🚨 AI Violation received', {
+    classes: detections.map(d => d.className),
+    timestamp: new Date(timestamp || Date.now()).toISOString(),
+  });
+
+  if (!runtimeState.session?.sessionId) {
+    logger.warn('[AI-BG] No active session — AI violation dropped');
+    return { ok: false, error: 'No active session' };
+  }
+
+  try {
+    const result = await apiService.reportAIViolation(detections, imageDataUrl);
+    logger.info('[AI-BG] AI violation reported to backend', result);
+    return { ok: true, result };
+  } catch (err) {
+    logger.error('[AI-BG] Failed to report AI violation:', err.message);
+    return { ok: false, error: err.message };
+  }
 }
 
 function initializeBackground() {
@@ -831,18 +1026,45 @@ function initializeBackground() {
   if (chrome.runtime && chrome.runtime.onSuspend) {
     chrome.runtime.onSuspend.addListener(() => {
       logger.info('Background service worker suspended');
+      // Dọn dẹp offscreen khi service worker unload
+      closeOffscreenDocument().catch(() => {});
     });
   }
 }
 
 // REGISTER MESSAGE LISTENER IMMEDIATELY
+// AI_FRAME, AI_VIOLATION, AI_ENSURE_OFFSCREEN xử lý riêng bên dưới
+// vì camera-monitor gửi raw message (không bọc envelope {type, data})
 onMessage({
-  START_PROCTORING: handleStartProctoring,
-  END_PROCTORING: handleEndProctoring,
-  GET_SESSION_INFO: handleGetSessionInfo,
-  HEARTBEAT: handleHeartbeatMessage,
-  LOG_VIOLATION: handleLogViolation,
-  REMOVE_OVERLAY_CSS: handleRemoveOverlayCSS,
+  START_PROCTORING:    handleStartProctoring,
+  END_PROCTORING:      handleEndProctoring,
+  GET_SESSION_INFO:    handleGetSessionInfo,
+  HEARTBEAT:           handleHeartbeatMessage,
+  LOG_VIOLATION:       handleLogViolation,
+  REMOVE_OVERLAY_CSS:  handleRemoveOverlayCSS,
+});
+
+// ── AI message handler (raw listener — camera-monitor gửi flat message) ──
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'AI_FRAME' && message?.imageData) {
+    handleAIFrame(message)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ ok: false, error: err.message, detections: [] }));
+    return true;
+  }
+  if (message?.type === 'AI_VIOLATION' && message?.detections) {
+    handleAIViolation(message)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+  if (message?.type === 'AI_ENSURE_OFFSCREEN') {
+    handleEnsureOffscreen()
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+  return false;
 });
 
 // Initialize service worker

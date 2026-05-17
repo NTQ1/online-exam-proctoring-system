@@ -264,6 +264,24 @@ class APIService {
       return false;
     }
   }
+
+  /**
+   * Báo cáo vi phạm AI (phone / student cheating) kèm ảnh chụp.
+   * @param {Array}  detections   - mảng Detection objects từ YOLO
+   * @param {string} imageDataUrl - base64 JPEG ảnh chụp tại thời điểm vi phạm
+   */
+  async reportAIViolation(detections, imageDataUrl) {
+    return this.request('/ai-violations', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId:    this.sessionId,
+        detections,
+        imageDataUrl, // base64 JPEG — backend lưu để giám thị xem lại
+        timestamp:    Date.now(),
+      }),
+      timeout: TIMEOUT_CONFIG.SERVER_SYNC,
+    });
+  }
 }
 
 // Export singleton instance

@@ -24,8 +24,8 @@ function parseBody(req) {
     const chunks = [];
     req.on('data', (chunk) => {
       chunks.push(chunk);
-      if (Buffer.concat(chunks).length > 1_000_000) {
-        reject(new Error('Request body too large'));
+      if (Buffer.concat(chunks).length > 12_000_000) {
+        reject(new Error('Request body too large (max 12 MB)'));
         req.destroy();
       }
     });
@@ -53,20 +53,23 @@ function buildSessionSnapshot(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return null;
   return {
-    sessionId: session.sessionId,
-    roomCode: session.roomCode,
-    studentName: session.studentName,
-    studentId: session.studentId,
-    status: session.status,
-    startedAt: session.startedAt,
-    endedAt: session.endedAt,
-    tabs: session.tabs,
-    client: session.client,
-    authToken: session.authToken,
-    updatedAt: session.updatedAt,
-    endPayload: session.endPayload || null,
-    violations: session.violations,
-    heartbeats: session.heartbeats,
+    sessionId:    session.sessionId,
+    roomCode:     session.roomCode,
+    studentName:  session.studentName,
+    studentId:    session.studentId,
+    status:       session.status,
+    startedAt:    session.startedAt,
+    endedAt:      session.endedAt,
+    tabs:         session.tabs,
+    client:       session.client,
+    authToken:    session.authToken,
+    updatedAt:    session.updatedAt,
+    endPayload:   session.endPayload || null,
+    violations:   session.violations,
+    heartbeats:   session.heartbeats,
+    // AI Detection violations (phone / student cheating — với ảnh chụp)
+    aiViolations: session.aiViolations || [],
+    aiViolationCount: (session.aiViolations || []).length,
   };
 }
 
@@ -381,6 +384,68 @@ async function handleOfflineLogs(req, res) {
   });
 }
 
+// ─── AI Violations ────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/ai-violations
+ * Body: { sessionId, detections[], imageDataUrl, timestamp }
+ *
+ * Detections schema:
+ *   [{ className, confidence, bbox: {x1,y1,x2,y2}, isViolation, isLogOnly }]
+ */
+async function handleAIViolation(req, res) {
+  const body = await parseBody(req);
+  const { sessionId, detections = [], imageDataUrl, timestamp } = body;
+
+  if (!sessionId) {
+    jsonResponse(res, 400, { ok: false, message: 'sessionId is required' });
+    return;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    jsonResponse(res, 404, { ok: false, message: 'Session not found' });
+    return;
+  }
+
+  // Khởi tạo mảng aiViolations nếu chưa có
+  if (!session.aiViolations) session.aiViolations = [];
+
+  const violation = {
+    id:           createToken('ai-v'),
+    detections,
+    imageDataUrl: imageDataUrl || null, // base64 JPEG
+    timestamp:    timestamp || Date.now(),
+  };
+
+  session.aiViolations.push(violation);
+  session.updatedAt = Date.now();
+
+  // ── In log đẹp ra console ────────────────────────────────────────────────
+  const ts  = new Date(violation.timestamp).toLocaleTimeString('vi-VN');
+  const cls = detections.map(d =>
+    `${d.className}(${(d.confidence * 100).toFixed(1)}%)`
+  ).join(', ');
+  const hasImg = !!imageDataUrl;
+  const imgKB  = hasImg ? Math.round(imageDataUrl.length * 0.75 / 1024) : 0;
+
+  console.log(
+    `\n\x1b[41m\x1b[37m 🚨 AI VIOLATION \x1b[0m` +
+    ` [${ts}] session=${sessionId.slice(0, 16)}...` +
+    `\n   classes  : ${cls}` +
+    `\n   snapshot : ${hasImg ? `JPEG ~${imgKB}KB` : 'none'}` +
+    `\n   total AI violations this session: ${session.aiViolations.length}\n`
+  );
+
+  jsonResponse(res, 200, {
+    ok:          true,
+    sessionId,
+    violationId: violation.id,
+    count:       session.aiViolations.length,
+    hasImage:    hasImg,
+  });
+}
+
 function handleGetSession(req, res, sessionId) {
   const session = sessions.get(sessionId);
   if (!session) {
@@ -478,6 +543,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && pathname === '/api/ai-violations') {
+      await handleAIViolation(req, res);
+      return;
+    }
+
     if (req.method === 'GET' && pathname.startsWith('/api/sessions/')) {
       const sessionId = pathname.split('/').pop();
       handleGetSession(req, res, sessionId);
@@ -506,6 +576,7 @@ server.listen(PORT, HOST, () => {
   console.log('  POST /api/violations');
   console.log('  POST /api/session/disconnect');
   console.log('  POST /api/offline-logs');
+  console.log('  POST /api/ai-violations       ');
   console.log('  GET  /api/sessions/:sessionId');
 });
 
