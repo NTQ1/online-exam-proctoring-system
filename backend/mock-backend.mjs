@@ -190,6 +190,40 @@ async function handleEndSession(req, res) {
   });
 }
 
+async function handleFinalizeSession(req, res) {
+  const body = await parseBody(req);
+  const { sessionId, endedAt, endReason, screenshotDataUrl, summary, triggerBlockchain, timestamp } = body;
+
+  if (!sessionId) {
+    jsonResponse(res, 400, { ok: false, message: 'sessionId is required' });
+    return;
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    jsonResponse(res, 404, { ok: false, message: 'Session not found' });
+    return;
+  }
+
+  session.status = 'finalized';
+  session.endedAt = endedAt || timestamp || Date.now();
+  session.endReason = endReason;
+  session.screenshotDataUrl = screenshotDataUrl || null;
+  session.summary = summary || {};
+  session.triggerBlockchain = triggerBlockchain || false;
+  session.updatedAt = Date.now();
+
+  const snapshot = buildSessionSnapshot(sessionId);
+
+  jsonResponse(res, 200, {
+    ok: true,
+    sessionId,
+    endedAt: session.endedAt,
+    snapshot,
+    message: 'Session finalized and blockchain triggered (mocked)',
+  });
+}
+
 async function handleHeartbeat(req, res) {
   const body = await parseBody(req);
   const { sessionId, timestamp } = body;
@@ -513,6 +547,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && pathname === '/api/sessions/finalize') {
+      await handleFinalizeSession(req, res);
+      return;
+    }
+
     if (req.method === 'POST' && pathname === '/api/sessions/heartbeat') {
       await handleHeartbeat(req, res);
       return;
@@ -570,6 +609,7 @@ server.listen(PORT, HOST, () => {
   console.log('  POST /api/auth/room-code');
   console.log('  POST /api/sessions/start');
   console.log('  POST /api/sessions/end');
+  console.log('  POST /api/sessions/finalize');
   console.log('  POST /api/sessions/heartbeat');
   console.log('  POST /api/violations/report');
   console.log('  POST /api/violations/batch');
