@@ -1,5 +1,5 @@
 import { DataTypes } from 'sequelize'
-import { sequelize } from '../libs/data.js'
+import { sequelize } from '../config/database.js'
 import MonitoringSession from './MonitoringSession.js'
 
 const BlockchainRecord = sequelize.define('BlockchainRecord', {

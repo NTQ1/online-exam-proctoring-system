@@ -1,19 +1,19 @@
-import { Sequelize } from 'sequelize'
-import dotenv from 'dotenv'
-dotenv.config()
+// import { Sequelize } from 'sequelize'
+// import dotenv from 'dotenv'
+// dotenv.config()
 
-export const sequelize = new Sequelize(
-  process.env.DB_NAME,
-  process.env.DB_USER,
-  process.env.DB_PASS || '',
-  {
-    host:    process.env.DB_HOST || 'localhost',
-    port:    process.env.DB_PORT || 3306,
-    dialect: 'mysql',
-    logging: false,
-  }
-)
-
+// export const sequelize = new Sequelize(
+//   process.env.DB_NAME,
+//   process.env.DB_USER,
+//   process.env.DB_PASS || '',
+//   {
+//     host:    process.env.DB_HOST || 'localhost',
+//     port:    process.env.DB_PORT || 3306,
+//     dialect: 'mysql',
+//     logging: false,
+//   }
+// )
+import { sequelize } from '../config/database.js'
 import User from '../models/User.js'
 import ExamRoom from '../models/ExamRoom.js'
 import ExamParticipant from '../models/ExamParticipant.js'

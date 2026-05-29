@@ -2,9 +2,6 @@ import { useState } from "react"
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -18,6 +15,7 @@ import {
 } from "@/components/ui/select"
 import api from "@/lib/axios"
 import { toast } from "sonner"
+import { XIcon } from "lucide-react"
 
 interface Props {
   open: boolean
@@ -28,7 +26,6 @@ interface Props {
 const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
   const [subjectName, setSubjectName] = useState("")
   const [monitorLevel, setMonitorLevel] = useState("MEDIUM")
-  const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async () => {
@@ -42,12 +39,10 @@ const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
       await api.post('/exam-rooms', {
         subject_name: subjectName,
         monitor_level: monitorLevel,
-        password: password || null,
       })
       toast.success("Tạo phòng thi thành công!")
       setSubjectName("")
       setMonitorLevel("MEDIUM")
-      setPassword("")
       onCreated()
       onClose()
     } catch (error) {
@@ -59,15 +54,17 @@ const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-<DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 rounded-xl border border-violet-500 [&_[data-slot=dialog-close]]:text-white [&_[data-slot=dialog-close]]:hover:bg-white/20">        
-        {/* Header tím sát viền */}
+      <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 rounded-xl border border-violet-500" showCloseButton={false}>
+        
         <div className="px-4 py-3 flex items-center justify-between" style={{
-            background: "linear-gradient(90deg, #7b2ff7 0%, #a62cff 45%, #c13cff 75%, #ff4fd8 100%)"
-            }}>
-            <h2 className="text-white font-bold text-base">Tạo phòng thi mới</h2>
-            </div>
+          background: "linear-gradient(90deg, #7b2ff7 0%, #a62cff 45%, #c13cff 75%, #ff4fd8 100%)"
+        }}>
+          <h2 className="text-white font-bold text-base">Tạo phòng thi mới</h2>
+          <button onClick={onClose} className="text-white hover:text-white/70 transition-colors">
+            <XIcon className="size-4" />
+          </button>
+        </div>
 
-        {/* Content */}
         <div className="flex flex-col gap-4 px-4 py-4">
           <div className="flex flex-col gap-2">
             <Label>Tên môn học <span className="text-destructive">*</span></Label>
@@ -91,18 +88,8 @@ const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
               </SelectContent>
             </Select>
           </div>
-
-          <div className="flex flex-col gap-2">
-            <Label>Mật khẩu phòng thi <span className="text-muted-foreground text-xs">(tuỳ chọn)</span></Label>
-            <Input
-              placeholder="Để trống nếu không cần"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
         </div>
 
-        {/* Footer */}
         <div className="flex justify-end gap-2 px-4 py-3 border-t">
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Huỷ

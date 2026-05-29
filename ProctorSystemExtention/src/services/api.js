@@ -111,17 +111,17 @@ class APIService {
    * Authenticate room code
    */
   async authenticateRoomCode(roomCode, studentName, studentId) {
-    return this.request('/auth/room-code', {
-      method: 'POST',
-      body: JSON.stringify({
-        roomCode,
-        studentName,
-        studentId,
-        timestamp: Date.now(),
-      }),
-      timeout: TIMEOUT_CONFIG.AUTHENTICATION,
-    });
-  }
+  return this.request('/exam-participants/join', {
+    method: 'POST',
+    body: JSON.stringify({
+      code: roomCode,
+      student_name: studentName,
+      student_id: studentId,
+      timestamp: Date.now(),
+    }),
+    timeout: TIMEOUT_CONFIG.AUTHENTICATION,
+  });
+}
 
   /**
    * Start proctoring session

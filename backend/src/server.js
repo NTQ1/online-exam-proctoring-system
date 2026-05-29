@@ -27,7 +27,8 @@ app.use(express.static(path.join(__dirname, '../public')))
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.use(cors({
-  origin: '*', credentials: true // Allow extension to connect
+  origin: process.env.CLIENT_URL
+, credentials: true // Allow extension to connect
 }))
 
 //public  routes

@@ -1,5 +1,5 @@
 import { DataTypes } from 'sequelize'
-import { sequelize } from '../libs/data.js'
+import { sequelize } from '../config/database.js'
 import ExamParticipant from './ExamParticipant.js'
 import MonitoringSession from './MonitoringSession.js'
 
