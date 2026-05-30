@@ -10,8 +10,9 @@ const FRAME_SEND_WIDTH = 416;
 const FRAME_SEND_HEIGHT = 416;
 
 const CLASS_COLORS = {
-  calculator: '#f59e0b', paper: '#6366f1', person: '#22d3ee',
-  phone: '#ef4444', 'student cheating': '#f97316',
+  person: '#22d3ee',
+  phone: '#ef4444',
+  'student cheating': '#f97316',
 };
 
 let stream = null, videoEl = null, canvasEl = null, overlayCanvas = null;

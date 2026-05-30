@@ -1,12 +1,11 @@
 /**
  * AI Inference Worker — Offscreen Document
  *
- * YOLO output shape: [1, 9, 8400]  (YOLOv8 format)
- *   → transpose → [1, 8400, 9]
- *   → boxes [0:4], class scores [4:9]
+ * YOLO output shape: [1, 7, 8400]  (YOLOv8 format: 4 tọa độ + 3 class)
+ * → transpose → [1, 8400, 7]
+ * → boxes [0:4], class scores [4:7]
  *
- * Classes: 0=calculator, 1=paper, 2=person, 3=phone, 4=student cheating
- * Threshold: 0.6 | NMS IOU: 0.45
+ * Classes: 0=person, 1=phone, 2=student cheating
  */
 
 const MODEL_URL     = chrome.runtime.getURL('src/services/AI/model.json');
@@ -14,11 +13,12 @@ const INPUT_SIZE    = 416;
 const CONF_THRESH   = 0.75;
 const IOU_THRESH    = 0.45;
 const MAX_DET       = 10;
-const CLASS_NAMES   = ['calculator', 'paper', 'person', 'phone', 'student cheating'];
+const CLASS_NAMES   = ['person', 'phone', 'student cheating'];
+
 // Vi phạm gửi ảnh snapshot lên backend
-const REPORT_SET    = new Set(['phone', 'student cheating']);
+const REPORT_SET    = new Set(['phone', 'student cheating', 'person']);
 // Chỉ log ra console
-const LOG_ONLY_SET  = new Set(['calculator', 'paper', 'person']);
+const LOG_ONLY_SET  = new Set();
 
 let model      = null;
 let modelReady = false;
@@ -76,14 +76,14 @@ async function runInference(pixelArray, width, height) {
 
   // ── Tiền xử lý ──────────────────────────────────────────────────────────
   const input = tf.tidy(() => {
-    let t = tf.browser.fromPixels(imgData);               // [H, W, 3] uint8
-    t = tf.image.resizeBilinear(t, [INPUT_SIZE, INPUT_SIZE]); // [416, 416, 3]
+    let t = tf.browser.fromPixels(imgData);               
+    t = tf.image.resizeBilinear(t, [INPUT_SIZE, INPUT_SIZE]); 
     t = tf.cast(t, 'float32');
-    t = tf.div(t, tf.scalar(255.0));                      // normalize [0,1]
-    return tf.expandDims(t, 0);                           // [1, 416, 416, 3]
+    t = tf.div(t, tf.scalar(255.0));                      
+    return tf.expandDims(t, 0);                           
   });
 
-  // ── Inference — dùng execute() theo khuyến nghị của TF.js ──────────────
+  // ── Inference ───────────────────────────────────────────────────────────
   let rawOutput;
   try {
     rawOutput = model.execute(input);
@@ -92,7 +92,6 @@ async function runInference(pixelArray, width, height) {
   }
 
   // ── Extract tensor từ bất kỳ dạng output nào ────────────────────────────
-  // execute() có thể trả về: Tensor | Tensor[] | NamedTensorMap (object)
   let outTensor;
   if (rawOutput instanceof tf.Tensor) {
     outTensor = rawOutput;
@@ -100,7 +99,6 @@ async function runInference(pixelArray, width, height) {
     outTensor = rawOutput[0];
     rawOutput.slice(1).forEach(t => { if (t instanceof tf.Tensor) t.dispose(); });
   } else if (rawOutput && typeof rawOutput === 'object') {
-    // NamedTensorMap — lấy tensor đầu tiên
     const vals = Object.values(rawOutput);
     outTensor = vals[0];
     vals.slice(1).forEach(t => { if (t instanceof tf.Tensor) t.dispose(); });
@@ -108,45 +106,42 @@ async function runInference(pixelArray, width, height) {
     throw new Error('Unexpected model output type: ' + typeof rawOutput);
   }
 
-  // ── Reshape output → [N_boxes, 9] ───────────────────────────────────────
-  // YOLOv8 có thể xuất [1, 9, 8400] hoặc [1, 8400, 9]
-  // Kiểm tra shape để quyết định có cần transpose không
-  const shape = outTensor.shape; // e.g. [1, 9, 8400] hoặc [1, 8400, 9]
+  // ── Reshape output ──────────────────────────────────────────────────────
+  const shape = outTensor.shape; 
   console.log('[AI-Offscreen] Raw output shape:', shape);
 
   let data2D;
   if (shape.length === 3 && shape[1] < shape[2]) {
-    // [1, 9, 8400] → transpose → [1, 8400, 9] → squeeze → [8400, 9]
     data2D = tf.tidy(() => tf.squeeze(tf.transpose(outTensor, [0, 2, 1]), [0]));
   } else if (shape.length === 3) {
-    // [1, 8400, 9] → squeeze → [8400, 9]
     data2D = tf.tidy(() => tf.squeeze(outTensor, [0]));
   } else if (shape.length === 2) {
-    // [8400, 9] — đã đúng format
     data2D = outTensor;
-    outTensor = null; // không dispose để tránh double-free
+    outTensor = null; 
   } else {
     outTensor.dispose();
     throw new Error('Unexpected output shape: ' + JSON.stringify(shape));
   }
   if (outTensor) outTensor.dispose();
 
-  // ── Tách boxes & scores dùng functional API ──────────────────────────────
+  // ── Tách boxes & scores ─────────────────────────────────────────────────
   const numBoxes = data2D.shape[0];
-  const boxes  = tf.tidy(() => tf.slice(data2D, [0, 0], [numBoxes, 4])); // [N, 4]
-  const scores = tf.tidy(() => tf.slice(data2D, [0, 4], [numBoxes, 5])); // [N, 5]
+  const numClasses = CLASS_NAMES.length; // ĐÃ FIX: Tự động đếm số lượng class (3)
+  
+  const boxes  = tf.tidy(() => tf.slice(data2D, [0, 0], [numBoxes, 4])); 
+  const scores = tf.tidy(() => tf.slice(data2D, [0, 4], [numBoxes, numClasses]));
   data2D.dispose();
 
-  const maxScores = tf.tidy(() => tf.max(scores, 1));                     // [N]
-  const classIds  = tf.tidy(() => tf.argMax(scores, 1));                  // [N]
+  const maxScores = tf.tidy(() => tf.max(scores, 1));                     
+  const classIds  = tf.tidy(() => tf.argMax(scores, 1));                  
   scores.dispose();
 
   // ── Lọc theo confidence threshold ───────────────────────────────────────
   const mask = tf.tidy(() => tf.greater(maxScores, tf.scalar(CONF_THRESH)));
-  const indices = await tf.whereAsync(mask);                              // [K, 1]
+  const indices = await tf.whereAsync(mask);                              
   mask.dispose();
 
-  const idx1D = tf.tidy(() => tf.reshape(indices, [-1]));                 // [K]
+  const idx1D = tf.tidy(() => tf.reshape(indices, [-1]));                 
   indices.dispose();
 
   // Nếu không có box nào vượt ngưỡng → trả kết quả rỗng
@@ -164,8 +159,6 @@ async function runInference(pixelArray, width, height) {
   boxes.dispose(); maxScores.dispose(); classIds.dispose(); idx1D.dispose();
 
   // ── NMS ─────────────────────────────────────────────────────────────────
-  // tf.image.nonMaxSuppression cần [y1, x1, y2, x2]
-  // YOLO output: cx, cy, w, h → chuyển đổi
   const xyxyBoxes = tf.tidy(() => {
     const cx = tf.slice(filtBoxes, [0, 0], [-1, 1]);
     const cy = tf.slice(filtBoxes, [0, 1], [-1, 1]);
@@ -182,7 +175,6 @@ async function runInference(pixelArray, width, height) {
   );
   xyxyBoxes.dispose();
 
-  // Dùng tf.gather + dataSync/arraySync thay vì .array() (chained method)
   const finalBoxTensor   = tf.gather(filtBoxes, nmsIdx);
   const finalScoreTensor = tf.gather(filtScores, nmsIdx);
   const finalClassTensor = tf.gather(filtClasses, nmsIdx);
@@ -200,11 +192,20 @@ async function runInference(pixelArray, width, height) {
   const detections = finalClassArr.map((classId, i) => {
     const className  = CLASS_NAMES[classId] ?? `class_${classId}`;
     const confidence = finalScoreArr[i];
-    const [cx, cy, w, h] = finalBoxArr[i];
-    const x1 = Math.max(0, (cx - w / 2) * width);
-    const y1 = Math.max(0, (cy - h / 2) * height);
-    const x2 = Math.min(width,  (cx + w / 2) * width);
-    const y2 = Math.min(height, (cy + h / 2) * height);
+
+    // ĐÃ FIX: Lấy tọa độ từ mảng trước khi chia tỷ lệ
+    const [cx_raw, cy_raw, w_raw, h_raw] = finalBoxArr[i]; 
+
+    const normCx = cx_raw / INPUT_SIZE;
+    const normCy = cy_raw / INPUT_SIZE;
+    const normW  = w_raw / INPUT_SIZE;
+    const normH  = h_raw / INPUT_SIZE;
+
+    const x1 = Math.max(0, (normCx - normW / 2) * width);
+    const y1 = Math.max(0, (normCy - normH / 2) * height);
+    const x2 = Math.min(width,  (normCx + normW / 2) * width);
+    const y2 = Math.min(height, (normCy + normH / 2) * height);
+    
     return {
       className,
       confidence,
