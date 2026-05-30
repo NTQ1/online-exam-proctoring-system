@@ -8,6 +8,9 @@ const router = express.Router()
 // Sinh viên join — không cần đăng nhập
 router.post('/join', joinExamRoom)
 
+// Route cho extension authenticate
+router.post('/proctor/authenticate', joinExamRoom)
+
 // Giảng viên xem danh sách
 router.get('/:id/participants', authenticate, authorize('admin'), getParticipants)
 

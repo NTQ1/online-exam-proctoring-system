@@ -1,5 +1,7 @@
 import ExamParticipant from '../models/ExamParticipant.js'
 import ExamRoom from '../models/ExamRoom.js'
+import crypto from 'crypto'
+import MonitoringSession from '../models/MonitoringSession.js'
 
 // Sinh viên join phòng thi (không cần đăng nhập)
 export const joinExamRoom = async (req, res) => {
@@ -34,7 +36,7 @@ export const joinExamRoom = async (req, res) => {
       return res.status(400).json({ message: 'MSSV này đã tham gia phòng thi rồi' })
     }
 
-    // Tạo record tham gia
+   // Tạo record tham gia
     const participant = await ExamParticipant.create({
       room_id: room.id,
       student_name,
@@ -43,8 +45,20 @@ export const joinExamRoom = async (req, res) => {
       joined_at: new Date(),
     })
 
+    const token = crypto.randomUUID()
+
+    const monitoringSession = await MonitoringSession.create({
+      participant_id: participant.id,
+      status: 'active',
+      start_time: new Date(),
+      verdict: 'pending',
+    })
+
     return res.status(201).json({
       message: 'Tham gia phòng thi thành công',
+      token,
+      sessionId: monitoringSession.id,
+      serverUrl: process.env.SERVER_URL,
       participant,
       room: {
         id: room.id,
