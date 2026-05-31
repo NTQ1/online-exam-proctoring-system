@@ -72,9 +72,7 @@ const StatsCards = () => {
             <div className="flex-1">
               <p className="text-sm text-muted-foreground">{card.title}</p>
               <p className="text-3xl font-bold">{card.value}</p>
-              <a href={card.link} className="text-sm text-violet-700 font-semibold">
-                Xem chi tiết →
-                </a>
+              
             </div>
           </CardContent>
         </Card>

@@ -5,10 +5,13 @@ import { authorize } from '../middlewares/authorize.js'
 
 const router = express.Router()
 
-// Sinh viên join phòng thi
-router.post('/join', authenticate, authorize('student'), joinExamRoom)
+// Sinh viên join — không cần đăng nhập
+router.post('/join', joinExamRoom)
 
-// Giảng viên xem danh sách sinh viên
+// Route cho extension authenticate
+router.post('/proctor/authenticate', joinExamRoom)
+
+// Giảng viên xem danh sách
 router.get('/:id/participants', authenticate, authorize('admin'), getParticipants)
 
 export default router

@@ -5,11 +5,11 @@
 // Server configuration
 export const SERVER_CONFIG = {
   // Development
-  development: {
-    baseUrl: 'http://localhost:3000',
-    apiUrl: 'http://localhost:3000/api',
-    wsUrl: 'ws://localhost:3000',
-  },
+ development: {
+  baseUrl: 'http://localhost:5001',
+  apiUrl: 'http://localhost:5001/api',
+  wsUrl: 'ws://localhost:5001',
+},
   // Production
   production: {
     baseUrl: 'https://api.proctor-system.com',

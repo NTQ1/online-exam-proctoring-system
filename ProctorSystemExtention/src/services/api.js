@@ -108,7 +108,7 @@ class APIService {
   }
 
   /**
-   * Authenticate room code
+   * Authenticate room code for extension proctoring
    */
   async authenticateRoomCode(roomCode, studentName, studentId) {
     return this.request('/auth/room-code', {
@@ -117,7 +117,6 @@ class APIService {
         roomCode,
         studentName,
         studentId,
-        timestamp: Date.now(),
       }),
       timeout: TIMEOUT_CONFIG.AUTHENTICATION,
     });

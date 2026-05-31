@@ -3,7 +3,7 @@ import { createHash } from 'crypto'
 import dotenv from 'dotenv'
 import ViolationEvent from '../models/ViolationEvent.js'
 import BlockchainRecord from '../models/BlockchainRecord.js'
-import contractABI from '../contracts/ViolationRegistry.json' assert { type: 'json' }
+import contractABI from '../contracts/ViolationRegistry.json' with { type: 'json' }
 
 dotenv.config()
 

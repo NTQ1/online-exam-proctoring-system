@@ -1,12 +1,16 @@
 import ExamParticipant from '../models/ExamParticipant.js'
 import ExamRoom from '../models/ExamRoom.js'
-import User from '../models/User.js'
+import crypto from 'crypto'
+import MonitoringSession from '../models/MonitoringSession.js'
 
-// Sinh viên join phòng thi
+// Sinh viên join phòng thi (không cần đăng nhập)
 export const joinExamRoom = async (req, res) => {
   try {
-    const { code, password } = req.body
-    const user_id = req.user.userId
+    const { code, password, student_name, student_id } = req.body
+
+    if (!student_name || !student_id) {
+      return res.status(400).json({ message: 'Vui lòng nhập họ tên và MSSV' })
+    }
 
     // Tìm phòng thi theo mã
     const room = await ExamRoom.findOne({ where: { code } })
@@ -14,34 +18,47 @@ export const joinExamRoom = async (req, res) => {
       return res.status(404).json({ message: 'Phòng thi không tồn tại' })
     }
 
-    // ✅ Chỉ cho join khi pending
-        if (room.status !== 'pending') {
-        return res.status(400).json({ message: 'Phòng thi đã bắt đầu hoặc kết thúc, không thể tham gia' })
-        }
+    // Chỉ cho join khi pending
+    if (room.status !== 'pending') {
+      return res.status(400).json({ message: 'Phòng thi đã bắt đầu hoặc kết thúc, không thể tham gia' })
+    }
 
     // Kiểm tra mật khẩu
     if (room.password && room.password !== password) {
       return res.status(400).json({ message: 'Mật khẩu không đúng' })
     }
 
-    // Kiểm tra sinh viên đã join chưa
+    // Kiểm tra sinh viên đã join chưa (theo MSSV + room_id)
     const existed = await ExamParticipant.findOne({
-      where: { room_id: room.id, user_id }
+      where: { room_id: room.id, student_id_string: student_id }
     })
     if (existed) {
-      return res.status(400).json({ message: 'Bạn đã tham gia phòng thi này rồi' })
+      return res.status(400).json({ message: 'MSSV này đã tham gia phòng thi rồi' })
     }
 
-    // Tạo record tham gia
+   // Tạo record tham gia
     const participant = await ExamParticipant.create({
       room_id: room.id,
-      user_id,
+      student_name,
+      student_id_string: student_id,
       status: 'online',
       joined_at: new Date(),
     })
 
+    const token = crypto.randomUUID()
+
+    const monitoringSession = await MonitoringSession.create({
+      participant_id: participant.id,
+      status: 'active',
+      start_time: new Date(),
+      verdict: 'pending',
+    })
+
     return res.status(201).json({
       message: 'Tham gia phòng thi thành công',
+      token,
+      sessionId: monitoringSession.id,
+      serverUrl: process.env.SERVER_URL,
       participant,
       room: {
         id: room.id,
@@ -70,11 +87,6 @@ export const getParticipants = async (req, res) => {
 
     const participants = await ExamParticipant.findAll({
       where: { room_id: id },
-      include: [{
-        model: User,
-        as: 'student',
-        attributes: ['id', 'username', 'first_name', 'last_name', 'student_id', 'email']
-      }],
       order: [['joined_at', 'ASC']]
     })
 

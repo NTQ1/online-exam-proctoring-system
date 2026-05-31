@@ -48,45 +48,49 @@ const ExamRoomTable = () => {
           </Button>
         </CardHeader>
         <CardContent>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="text-left py-3 font-medium">Mã phòng thi</th>
-                <th className="text-left py-3 font-medium">Môn học</th>
-                <th className="text-left py-3 font-medium">Mức giám sát</th>
-                <th className="text-left py-3 font-medium">Trạng thái</th>
-                <th className="text-left py-3 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rooms.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-6 text-muted-foreground">
-                    Chưa có phòng thi nào
-                  </td>
-                </tr>
-              ) : (
-                rooms.map((room) => (
-                  <tr key={room.id} className="border-b hover:bg-muted/50">
-                    <td className="py-3 font-mono font-semibold">{room.code}</td>
-                    <td className="py-3">{room.subject_name}</td>
-                    <td className="py-3">{room.monitor_level}</td>
-                    <td className="py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusMap[room.status].color}`}>
-                        {statusMap[room.status].label}
-                      </span>
-                    </td>
-                    <td className="py-3">
-                      <Button variant="ghost" size="icon">
-                        <MoreVertical className="size-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </CardContent>
+  <table className="w-full text-sm">
+    <thead>
+      <tr className="border-b text-muted-foreground">
+        <th className="text-left py-3 font-medium">Mã phòng thi</th>
+        <th className="text-left py-3 font-medium">Môn học</th>
+        <th className="text-left py-3 font-medium">Mức giám sát</th>
+        <th className="text-left py-3 font-medium">Trạng thái</th>
+        <th className="text-left py-3 font-medium"></th>
+      </tr>
+    </thead>
+  </table>
+  <div className="max-h-48 overflow-y-auto">
+    <table className="w-full text-sm">
+      <tbody>
+        {rooms.length === 0 ? (
+          <tr>
+            <td colSpan={5} className="text-center py-6 text-muted-foreground">
+              Chưa có phòng thi nào
+            </td>
+          </tr>
+        ) : (
+          rooms.map((room) => (
+            <tr key={room.id} className="border-b hover:bg-muted/50">
+              <td className="py-3 font-mono font-semibold">{room.code}</td>
+              <td className="py-3">{room.subject_name}</td>
+              <td className="py-3">{room.monitor_level}</td>
+              <td className="py-3">
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusMap[room.status].color}`}>
+                  {statusMap[room.status].label}
+                </span>
+              </td>
+              <td className="py-3">
+                <Button variant="ghost" size="icon">
+                  <MoreVertical className="size-4" />
+                </Button>
+              </td>
+            </tr>
+          ))
+        )}
+      </tbody>
+    </table>
+  </div>
+</CardContent>
       </Card>
 
       <CreateExamRoomDialog

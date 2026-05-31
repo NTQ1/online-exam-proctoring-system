@@ -1,5 +1,5 @@
 import { DataTypes } from 'sequelize'
-import { sequelize } from '../libs/data.js'
+import { sequelize } from '../config/database.js'
 
 const User = sequelize.define('User', {
   id: {
@@ -101,16 +101,10 @@ const User = sequelize.define('User', {
 
 
   role: {
-    type: DataTypes.ENUM('student', 'admin'),
-    allowNull: false,
-    defaultValue: 'student',
-    validate: {
-      isIn: {
-        args: [['student', 'admin']],
-        msg: 'Role phải là student hoặc admin',
-      },
-    },
-  },
+  type: DataTypes.ENUM('admin'),
+  allowNull: false,
+  defaultValue: 'admin',
+},
 
 }, {
   tableName: 'users',

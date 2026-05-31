@@ -1,5 +1,5 @@
 import { DataTypes } from 'sequelize'
-import { sequelize } from '../libs/data.js'
+import { sequelize } from '../config/database.js'
 import User from './User.js'
 
 const ExamRoom = sequelize.define('ExamRoom', {
@@ -13,10 +13,7 @@ const ExamRoom = sequelize.define('ExamRoom', {
     allowNull: false,
     unique: true,
   },
-  password: {
-  type: DataTypes.STRING(10),
-  allowNull: true,  // ✅ cho phép null
-  },
+  
   subject_name: {
     type: DataTypes.STRING(100),
     allowNull: false,
