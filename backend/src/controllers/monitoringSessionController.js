@@ -1,32 +1,22 @@
 import MonitoringSession from '../models/MonitoringSession.js'
 import ExamParticipant from '../models/ExamParticipant.js'
-import crypto from 'crypto'
 
 export const startSession = async (req, res) => {
   try {
-    const {
-      sessionId,
-      roomCode,
-      studentName,
-      studentId,
-    } = req.body
+    const { participantId } = req.body
 
-    const participant = await ExamParticipant.findOne({
-      where: {
-        student_id_string: studentId,
-      },
-      order: [['createdAt', 'DESC']],
-    })
+    if (!participantId) {
+      return res.status(400).json({ message: 'participantId là bắt buộc' })
+    }
 
+    // Xác nhập participant tồn tại
+    const participant = await ExamParticipant.findByPk(participantId)
     if (!participant) {
-      return res.status(404).json({
-        message: 'Không tìm thấy sinh viên',
-      })
+      return res.status(404).json({ message: 'Không tìm thấy sinh viên' })
     }
 
     const session = await MonitoringSession.create({
-      id: sessionId,
-      participant_id: participant.id,
+      participant_id: participantId,
       status: 'active',
       start_time: new Date(),
       verdict: 'pending',
@@ -34,11 +24,11 @@ export const startSession = async (req, res) => {
 
     return res.status(201).json({
       message: 'Session started',
+      sessionId: session.id,
       session,
     })
   } catch (error) {
     console.error(error)
-
     return res.status(500).json({
       message: 'Lỗi tạo session',
       error: error.message,

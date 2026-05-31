@@ -32,7 +32,8 @@ export function SignupForm({
 
   const onsubmit = async (data: SignupFormValues) => {
     const { firstName, lastName, username, email, password } = data
-    await signUp(username, email, password, firstName, lastName, 'admin') // ✅ mặc định admin
+    // Trang /signup chỉ dành cho giảng viên — sinh viên join phòng thi qua mã, không cần tài khoản
+    await signUp(username, email, password, firstName, lastName, 'admin')
     navigate("/signin")
   }
 

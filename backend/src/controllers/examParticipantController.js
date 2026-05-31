@@ -1,7 +1,6 @@
 import ExamParticipant from '../models/ExamParticipant.js'
 import ExamRoom from '../models/ExamRoom.js'
 import crypto from 'crypto'
-import MonitoringSession from '../models/MonitoringSession.js'
 
 // Sinh viên join phòng thi (không cần đăng nhập)
 export const joinExamRoom = async (req, res) => {
@@ -45,19 +44,13 @@ export const joinExamRoom = async (req, res) => {
       joined_at: new Date(),
     })
 
+    // Token dùng để extension xác thực các request tiếp theo
     const token = crypto.randomUUID()
-
-    const monitoringSession = await MonitoringSession.create({
-      participant_id: participant.id,
-      status: 'active',
-      start_time: new Date(),
-      verdict: 'pending',
-    })
 
     return res.status(201).json({
       message: 'Tham gia phòng thi thành công',
       token,
-      sessionId: monitoringSession.id,
+      participantId: participant.id,
       serverUrl: process.env.SERVER_URL,
       participant,
       room: {

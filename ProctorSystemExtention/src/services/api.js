@@ -108,15 +108,16 @@ class APIService {
   }
 
   /**
-   * Authenticate room code for extension proctoring
+   * Authenticate room code for extension proctoring.
+   * Maps to POST /api/exam-participants/join — không cần đăng nhập.
    */
   async authenticateRoomCode(roomCode, studentName, studentId) {
-    return this.request('/auth/room-code', {
+    return this.request('/exam-participants/join', {
       method: 'POST',
       body: JSON.stringify({
-        roomCode,
-        studentName,
-        studentId,
+        code: roomCode,
+        student_name: studentName,
+        student_id: studentId,
       }),
       timeout: TIMEOUT_CONFIG.AUTHENTICATION,
     });
