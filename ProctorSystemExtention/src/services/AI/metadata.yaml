@@ -1,7 +1,7 @@
-description: Ultralytics best model trained on /content/Cheating-1/data.yaml
+description: Ultralytics best model trained on /content/Cheating-2/data.yaml
 author: Ultralytics
-date: '2026-03-31T12:08:35.088358'
-version: 8.4.32
+date: '2026-05-30T03:09:21.029725'
+version: 8.4.56
 license: AGPL-3.0 License (https://ultralytics.com/license)
 docs: https://docs.ultralytics.com
 stride: 32
@@ -11,13 +11,13 @@ imgsz:
 - 416
 - 416
 names:
-  0: calculator
-  1: paper
-  2: person
-  3: phone
-  4: student cheating
+  0: person
+  1: phone
+  2: student cheating
 args:
+  data: null
   batch: 1
+  fraction: 1.0
   half: false
   int8: false
   nms: false
