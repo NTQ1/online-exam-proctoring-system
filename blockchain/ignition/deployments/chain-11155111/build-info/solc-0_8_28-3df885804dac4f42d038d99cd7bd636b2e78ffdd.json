@@ -1,0 +1,49 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-3df885804dac4f42d038d99cd7bd636b2e78ffdd",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "compilerType": "solc",
+  "toolVersions": {
+    "hardhat": "3.5.1"
+  },
+  "userSourceNameMap": {
+    "contracts/ViolationRegistry.sol": "project/contracts/ViolationRegistry.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/ViolationRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.28;\n\n/**\n * @title ViolationRegistry\n * @notice Ghi nhận vi phạm thi cử lên blockchain để đảm bảo tính minh bạch.\n *         Chỉ emit event (không lưu storage) → tiết kiệm gas.\n *         dataHash = SHA-256 payload → dùng để verify integrity sau này.\n */\ncontract ViolationRegistry {\n    struct Violation {\n        string violationType;\n        uint256 timestamp;\n    }\n\n    event ViolationLogged(\n        string indexed sessionId,\n        bytes32 dataHash,\n        Violation[] violations,\n        uint256 timestamp\n    );\n\n    address public owner;\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, \"Not owner\");\n        _;\n    }\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    /**\n     * @notice Ghi vi phạm lên chain. Chỉ owner (backend wallet) mới được gọi.\n     * @param sessionId  UUID của phiên giám sát\n     * @param dataHash   SHA-256 hash của payload gốc (dùng để verify)\n     * @param violations Mảng vi phạm (type + timestamp)\n     */\n    function logViolation(\n        string calldata sessionId,\n        bytes32 dataHash,\n        Violation[] calldata violations\n    ) external onlyOwner {\n        emit ViolationLogged(sessionId, dataHash, violations, block.timestamp);\n    }\n}\n"
+      }
+    }
+  }
+}
