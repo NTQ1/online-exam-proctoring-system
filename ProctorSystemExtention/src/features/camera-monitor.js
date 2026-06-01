@@ -4,6 +4,8 @@
  */
 
 const CAMERA_INTERVAL_MS = 1000;
+const MODEL_READY_POLL_MS = 2000;
+const MODEL_READY_TIMEOUT_MS = 120000;
 const CAPTURE_WIDTH = 640;
 const CAPTURE_HEIGHT = 480;
 const FRAME_SEND_WIDTH = 416;
@@ -18,6 +20,11 @@ const CLASS_COLORS = {
 let stream = null, videoEl = null, canvasEl = null, overlayCanvas = null;
 let intervalId = null, isRunning = false, frameCounter = 0, violationCount = 0, lastDetections = [];
 
+// FIX #2: frameInFlight giúp ngăn processFrame bắt đầu một frame mới trong khi
+// frame trước chưa xong. Kết hợp với isRunning guard sau mỗi await,
+// đảm bảo không có frame nào được gửi sau khi stopCameraMonitor() được gọi.
+let frameInFlight = false;
+
 // ─── Messaging ──────────────────────────────────────────────────────────────
 
 function sendMsg(message) {
@@ -28,7 +35,8 @@ function sendMsg(message) {
         if (err) {
           // 'Receiving end does not exist' = offscreen đã đóng, không phải bug
           if (!err.includes('Receiving end does not exist') &&
-              !err.includes('message channel closed')) {
+            !err.includes('message channel closed') &&
+            !err.includes('Extension context invalidated')) {
             console.warn('[CameraMonitor] sendMsg error:', err);
           }
           resolve(null);
@@ -151,64 +159,135 @@ function captureSnapshot() {
 // ─── Inference Loop ──────────────────────────────────────────────────────────
 
 async function processFrame() {
-  // Guard: nếu monitor đã bị dừng trong khi frame đang xử lý → thoát ngay
+  // FIX #2: Guard ở đầu — bỏ qua nếu đã dừng hoặc frame trước chưa xong
+  if (!isRunning || frameInFlight) return;
+
+  frameInFlight = true;
+  try {
+    frameCounter++;
+    const frameId = frameCounter;
+    const imgData = captureFrame();
+
+    // Guard sau captureFrame — isRunning có thể đổi trong khi captureFrame chạy
+    if (!imgData || !isRunning) return;
+
+    const response = await sendMsg({
+      type: 'AI_FRAME',
+      imageData: Array.from(imgData.data),
+      width: FRAME_SEND_WIDTH,
+      height: FRAME_SEND_HEIGHT,
+      frameId,
+    });
+
+    // FIX #2: Guard SAU mỗi await — đây là điểm then chốt.
+    // isRunning có thể đã false trong khi sendMsg đang chờ response.
+    // Nếu không guard ở đây, code bên dưới vẫn chạy dù đã stop.
+    if (!isRunning) return;
+
+    // null response = connection đã đóng (offscreen bị đóng)
+    if (response === null) {
+      console.log('[CameraMonitor] Connection lost — stopping monitor automatically');
+      stopCameraMonitor();
+      return;
+    }
+
+    if (!response?.ok) {
+      // Nếu lỗi là session đã kết thúc → dừng hẳn, không log spam
+      if (response?.error === 'Session ended') {
+        console.log('[CameraMonitor] Session ended signal received — stopping');
+        stopCameraMonitor();
+        return;
+      }
+      // Log thưa hơn để tránh spam console
+      if (frameId <= 3 || frameId % 10 === 0) {
+        console.warn(`[CameraMonitor] Frame #${frameId} failed:`, response?.error || 'unknown error');
+      }
+      return;
+    }
+
+    // Guard lần nữa trước khi vẽ UI
+    if (!isRunning) return;
+
+    const detections = response.detections || [];
+    lastDetections = detections;
+    drawDetections(detections);
+    updateBadge(detections);
+
+    if (detections.length > 0) {
+      console.groupCollapsed(`[CameraMonitor] Frame #${frameId} | ${detections.length} det`);
+      detections.forEach(d => console.log(`  ${d.isViolation ? '🚨' : '📋'} ${d.className} ${(d.confidence * 100).toFixed(1)}%`));
+      console.groupEnd();
+    }
+
+    const violations = detections.filter(d => d.isViolation);
+    if (violations.length > 0 && isRunning) {
+      violationCount += violations.length;
+      console.warn('[CameraMonitor] 🚨 VIOLATION!', violations.map(d => d.className));
+      const snapshot = captureSnapshot();
+      // Fire-and-forget — không cần await, không chặn vòng lặp chính
+      sendMsg({
+        type: 'AI_VIOLATION',
+        detections: violations,
+        imageDataUrl: snapshot,
+        frameId,
+        timestamp: Date.now(),
+      });
+    }
+  } finally {
+    // FIX #2: Luôn reset frameInFlight dù success hay error,
+    // để interval tiếp theo được xử lý bình thường
+    frameInFlight = false;
+  }
+}
+
+// ─── Model Readiness ─────────────────────────────────────────────────────────
+
+async function ensureModelReady() {
   if (!isRunning) return;
 
-  frameCounter++;
-  const frameId = frameCounter;
-  const imgData = captureFrame();
-  if (!imgData || !isRunning) return;
+  const badge = document.getElementById('__proctor-ai-badge');
 
-  const response = await sendMsg({
-    type: 'AI_FRAME',
-    imageData: Array.from(imgData.data),
-    width: FRAME_SEND_WIDTH,
-    height: FRAME_SEND_HEIGHT,
-    frameId,
-  });
-
-  // null response = connection đã đóng (lỗi đã được silence trong sendMsg)
-  // → tự dừng vòng lặp thay vì tiếp tục gửi frame vô ích
-  if (response === null) {
-    console.log('[CameraMonitor] Connection lost — stopping monitor automatically');
-    stopCameraMonitor();
-    return;
+  // Bước 1: Tạo offscreen document + kích hoạt load model
+  const ensureRes = await sendMsg({ type: 'AI_ENSURE_OFFSCREEN' });
+  if (!isRunning) return; // Guard sau await
+  if (!ensureRes?.ok) {
+    console.warn('[CameraMonitor] AI_ENSURE_OFFSCREEN failed, will retry inline');
   }
-  if (!response?.ok) {
-    if (frameId <= 3 || frameId % 10 === 0) {
-      console.warn(`[CameraMonitor] Frame #${frameId} failed:`, response?.error || 'unknown error');
+
+  // Bước 2: Poll cho đến khi model.status === 'ready'
+  const deadline = Date.now() + MODEL_READY_TIMEOUT_MS;
+  let attempt = 0;
+
+  while (Date.now() < deadline) {
+    if (!isRunning) return;
+
+    const statusRes = await sendMsg({ type: 'AI_STATUS' });
+    if (!isRunning) return; // Guard sau await
+    attempt++;
+
+    if (statusRes?.status === 'ready') {
+      if (badge) {
+        badge.style.borderColor = 'rgba(255,255,255,0.15)';
+        badge.style.color = 'rgba(255,255,255,0.7)';
+        badge.textContent = '🤖 AI: sẵn sàng';
+      }
+      console.log(`[CameraMonitor] ✅ Model ready after ${attempt} poll(s)`);
+      return;
     }
-    // Nếu lỗi là session đã kết thúc → dừng hẳn
-    if (response?.error === 'Session ended') {
-      console.log('[CameraMonitor] Session ended signal received — stopping');
-      stopCameraMonitor();
+
+    if (badge) {
+      const dotCount = (attempt % 3) + 1;
+      badge.textContent = `🤖 AI: đang tải model${'...'.slice(0, dotCount)}`;
     }
-    return;
+    console.log(`[CameraMonitor] ⏳ Waiting for model... status="${statusRes?.status ?? 'unknown'}" (attempt ${attempt})`);
+
+    await new Promise(r => setTimeout(r, MODEL_READY_POLL_MS));
   }
 
-  const detections = response.detections || [];
-  lastDetections = detections;
-  drawDetections(detections);
-  updateBadge(detections);
-
-  if (detections.length > 0) {
-    console.groupCollapsed(`[CameraMonitor] Frame #${frameId} | ${detections.length} det`);
-    detections.forEach(d => console.log(`  ${d.isViolation ? '🚨' : '📋'} ${d.className} ${(d.confidence * 100).toFixed(1)}%`));
-    console.groupEnd();
-  }
-
-  const violations = detections.filter(d => d.isViolation);
-  if (violations.length > 0) {
-    violationCount += violations.length;
-    console.warn('[CameraMonitor] 🚨 VIOLATION!', violations.map(d => d.className));
-    const snapshot = captureSnapshot();
-    sendMsg({
-      type: 'AI_VIOLATION',
-      detections: violations,
-      imageDataUrl: snapshot,
-      frameId,
-      timestamp: Date.now(),
-    });
+  console.warn('[CameraMonitor] ⚠️ Model not ready after timeout — starting anyway (may drop frames)');
+  if (badge) {
+    badge.textContent = '🤖 AI: timeout, thử tiếp';
+    badge.style.color = '#f97316';
   }
 }
 
@@ -248,32 +327,45 @@ async function startCameraMonitor() {
   document.body.appendChild(canvasEl);
 
   await new Promise(r => { videoEl.onloadedmetadata = r; });
-  await videoEl.play().catch(() => {});
+  await videoEl.play().catch(() => { });
 
+  // FIX #2: Set isRunning = true chỉ SAU khi camera đã sẵn sàng
   isRunning = true;
   frameCounter = 0;
   violationCount = 0;
+  frameInFlight = false;
 
-  sendMsg({ type: 'AI_ENSURE_OFFSCREEN' }).then(res => {
-    console.log('[CameraMonitor] Offscreen status:', res);
-    const b = document.getElementById('__proctor-ai-badge');
-    if (b && res?.ok) b.textContent = '🤖 AI: sẵn sàng';
-  });
+  console.log('[CameraMonitor] ✅ Camera started — waiting for AI model to be ready...');
 
-  console.log('[CameraMonitor] ✅ Started');
+  await ensureModelReady();
+
+  // Guard sau ensureModelReady — monitor có thể bị dừng trong khi chờ model
+  if (!isRunning) {
+    console.log('[CameraMonitor] Monitor was stopped during model wait — not starting inference loop');
+    return;
+  }
+
+  console.log('[CameraMonitor] 🤖 Model ready — starting inference loop');
   intervalId = setInterval(() => processFrame().catch(console.error), CAMERA_INTERVAL_MS);
 }
 
 function stopCameraMonitor() {
   if (!isRunning) return;
   console.log('[CameraMonitor] 🛑 Stopping...');
+
+  // FIX #2: Set isRunning = false TRƯỚC clearInterval.
+  // Bất kỳ processFrame() nào đang chạy async sẽ thấy isRunning=false
+  // và thoát sớm ở guard sau mỗi await, tránh gửi thêm message đến offscreen đã đóng.
+  isRunning = false;
+
   clearInterval(intervalId);
   intervalId = null;
-  isRunning = false;
+
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   document.getElementById('__proctor-camera-section')?.remove();
   canvasEl?.remove();
   videoEl = canvasEl = overlayCanvas = null;
+  frameInFlight = false;
   console.log(`[CameraMonitor] Stopped. Violations=${violationCount}, Frames=${frameCounter}`);
 }
 
@@ -282,16 +374,18 @@ function stopCameraMonitor() {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'STOP_CAMERA' || message?.type === 'SESSION_CLEANUP') {
     stopCameraMonitor();
-    // QUAN TRỌNG: phải gọi sendResponse để Chrome không báo 'port closed'
-    // Nếu không gọi, sendToTab() ở background sẽ throw và SESSION_CLEANUP bị bỏ qua
-    try { sendResponse({ ok: true }); } catch (_) {}
-    return true; // giữ channel mở cho sendResponse async
+    try { sendResponse({ ok: true }); } catch (_) { }
+    return true;
   }
   return false;
 });
 
 // ─── Export & Autostart ──────────────────────────────────────────────────────
 
-window.__cameraMonitor = { start: startCameraMonitor, stop: stopCameraMonitor, status: () => ({ isRunning, frameCounter, violationCount }) };
+window.__cameraMonitor = {
+  start: startCameraMonitor,
+  stop: stopCameraMonitor,
+  status: () => ({ isRunning, frameCounter, violationCount }),
+};
 
 startCameraMonitor();

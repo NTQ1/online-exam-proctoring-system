@@ -107,17 +107,13 @@ class APIService {
     }
   }
 
-  /**
-   * Authenticate room code for extension proctoring.
-   * Maps to POST /api/exam-participants/join — không cần đăng nhập.
-   */
   async authenticateRoomCode(roomCode, studentName, studentId) {
-    return this.request('/exam-participants/join', {
+    return this.request('/auth/room-code', {
       method: 'POST',
       body: JSON.stringify({
-        code: roomCode,
-        student_name: studentName,
-        student_id: studentId,
+        roomCode,
+        studentName,
+        studentId,
       }),
       timeout: TIMEOUT_CONFIG.AUTHENTICATION,
     });
@@ -208,23 +204,73 @@ class APIService {
    * @param {Object} param
    * @param {number} param.endedAt            - timestamp kết thúc
    * @param {string} param.reason             - lý do kết thúc ('user_clicked_end', v.v.)
-   * @param {string|null} param.screenshotDataUrl - ảnh chụp màn hình cuối
+   * @param {string|null} param.screenshotUrl - URL ảnh trên server (sau khi uploadScreenshot)
    * @param {Object} param.summary            - tóm tắt phiên (roomCode, studentName, ...)
    */
-  async finalizeSession({ endedAt, reason, screenshotDataUrl, summary }) {
+  async finalizeSession({ endedAt, reason, screenshotUrl, summary }) {
     return this.request('/sessions/finalize', {
       method: 'POST',
       body: JSON.stringify({
         sessionId: this.sessionId,
         endedAt,
         endReason: reason,
-        screenshotDataUrl,
+        screenshotUrl,          // URL trên server — không phải base64 inline
         summary,
         triggerBlockchain: true,
         timestamp: Date.now(),
       }),
       timeout: TIMEOUT_CONFIG.SERVER_SYNC,
     });
+  }
+
+  /**
+   * Upload ảnh chụp màn hình cuối lên server qua multipart/form-data.
+   * Gọi trước finalizeSession để tách biệt việc truyền ảnh khỏi JSON payload.
+   * @param {Blob} imageBlob  - JPEG blob ứng viới ảnh chụp
+   * @param {string} sessionId - ID phiên để liên kết trên server
+   * @returns {Promise<{ screenshotUrl: string }>}
+   */
+  async uploadScreenshot(imageBlob, sessionId) {
+    const url = `${this.getApiBaseUrl()}/sessions/screenshot`;
+    const headers = {};
+
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const form = new FormData();
+    form.append('screenshot', imageBlob, 'screenshot.jpg');
+    if (sessionId) form.append('sessionId', sessionId);
+
+    const timeoutMs = TIMEOUT_CONFIG.SERVER_SYNC;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      logger.debug('API uploadScreenshot', { url, sizeKB: Math.round(imageBlob.size / 1024) });
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: form,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      logger.debug('API uploadScreenshot response', { screenshotUrl: data?.screenshotUrl });
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      logger.error('API uploadScreenshot failed', { error: error.message });
+      throw error;
+    }
   }
 
   /**
