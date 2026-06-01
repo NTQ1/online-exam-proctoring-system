@@ -47,6 +47,4 @@ const BlockchainRecord = sequelize.define('BlockchainRecord', {
   timestamps: true,
 })
 
-BlockchainRecord.belongsTo(MonitoringSession, { foreignKey: 'session_id', as: 'session' })
-
 export default BlockchainRecord

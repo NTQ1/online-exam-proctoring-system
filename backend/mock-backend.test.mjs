@@ -1,16 +1,17 @@
 /**
  * Full Test Suite - Proctor System Extension
  * Covers:
- *  - Suite A: Mock Backend API endpoints
+ *  - Suite A: Mock Backend API endpoints (including new screenshot & finalize)
  *  - Suite B: Unit test block-actions key matching logic (BUG-4 fix)
  *  - Suite C: Unit test heartbeat-monitor timeout (BUG-5 fix)
- *  - Suite D: Integration - full session lifecycle via mock backend
+ *  - Suite D: Integration - full session lifecycle via mock backend (incl. screenshot upload)
  */
-
+import busboy from 'busboy';
 import assert from 'node:assert';
+import { randomBytes } from 'node:crypto';
 import './mock-backend.mjs';
 
-const BASE_URL = 'http://127.0.0.1:3000/api';
+const BASE_URL = 'http://127.0.0.1:5001/api';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -46,24 +47,46 @@ async function get(path) {
   return { status: res.status, data: await res.json() };
 }
 
+/**
+ * Upload screenshot (multipart/form-data)
+ * @param {string} sessionId
+ * @returns {Promise<{screenshotUrl: string}>}
+ */
+async function uploadScreenshot(sessionId) {
+  // Tạo một JPEG blob giả (1KB dữ liệu ngẫu nhiên)
+  const fakeJpeg = randomBytes(1024);
+  const blob = new Blob([fakeJpeg], { type: 'image/jpeg' });
+  const formData = new FormData();
+  formData.append('screenshot', blob, 'test.jpg');
+  formData.append('sessionId', sessionId);
+
+  const res = await fetch(`${BASE_URL}/sessions/screenshot`, {
+    method: 'POST',
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message);
+  return { screenshotUrl: data.screenshotUrl };
+}
+
 // ─── Suite B: block-actions key matching logic ───────────────────────────────
 // Simulates the FIXED handleKeyDown matching logic without a DOM
 const DANGEROUS_KEYS = [
-  { ctrlKey: true,  shiftKey: false, altKey: false, code: 'KeyP',  name: 'Ctrl+P (In trang)' },
-  { ctrlKey: true,  shiftKey: false, altKey: false, code: 'KeyU',  name: 'Ctrl+U (View Source)' },
-  { ctrlKey: false, shiftKey: false, altKey: false, code: 'F12',   name: 'F12 (DevTools)' },
-  { ctrlKey: true,  shiftKey: true,  altKey: false, code: 'KeyI',  name: 'Ctrl+Shift+I (DevTools)' },
-  { ctrlKey: true,  shiftKey: true,  altKey: false, code: 'KeyC',  name: 'Ctrl+Shift+C (Inspector)' },
-  { ctrlKey: true,  shiftKey: true,  altKey: false, code: 'KeyJ',  name: 'Ctrl+Shift+J (Console)' },
-  { ctrlKey: true,  shiftKey: true,  altKey: false, code: 'KeyK',  name: 'Ctrl+Shift+K (DevTools)' },
+  { ctrlKey: true, shiftKey: false, altKey: false, code: 'KeyP', name: 'Ctrl+P (In trang)' },
+  { ctrlKey: true, shiftKey: false, altKey: false, code: 'KeyU', name: 'Ctrl+U (View Source)' },
+  { ctrlKey: false, shiftKey: false, altKey: false, code: 'F12', name: 'F12 (DevTools)' },
+  { ctrlKey: true, shiftKey: true, altKey: false, code: 'KeyI', name: 'Ctrl+Shift+I (DevTools)' },
+  { ctrlKey: true, shiftKey: true, altKey: false, code: 'KeyC', name: 'Ctrl+Shift+C (Inspector)' },
+  { ctrlKey: true, shiftKey: true, altKey: false, code: 'KeyJ', name: 'Ctrl+Shift+J (Console)' },
+  { ctrlKey: true, shiftKey: true, altKey: false, code: 'KeyK', name: 'Ctrl+Shift+K (DevTools)' },
 ];
 
 function shouldBlock(event) {
   for (const dk of DANGEROUS_KEYS) {
-    const ctrlMatch  = dk.ctrlKey  ? event.ctrlKey  : !event.ctrlKey;
+    const ctrlMatch = dk.ctrlKey ? event.ctrlKey : !event.ctrlKey;
     const shiftMatch = dk.shiftKey ? event.shiftKey : !event.shiftKey;
-    const altMatch   = dk.altKey   ? event.altKey   : !event.altKey;
-    const codeMatch  = event.code === dk.code;
+    const altMatch = dk.altKey ? event.altKey : !event.altKey;
+    const codeMatch = event.code === dk.code;
     if (codeMatch && ctrlMatch && shiftMatch && altMatch) return dk.name;
   }
   return null;
@@ -197,7 +220,7 @@ async function runAll() {
     const map = buildHeartbeatMap();
     const now = Date.now();
     handleHeartbeatSim(map, { sessionId: 'active', tabId: 1, timestamp: now - 20000 });
-    handleHeartbeatSim(map, { sessionId: 'stale',  tabId: 2, timestamp: now - 95000 });
+    handleHeartbeatSim(map, { sessionId: 'stale', tabId: 2, timestamp: now - 95000 });
     const disconnected = checkTimeoutSim(map, now, 90000);
     assert.strictEqual(disconnected.length, 1);
     assert.strictEqual(disconnected[0], 'stale');
@@ -211,8 +234,24 @@ async function runAll() {
 
   let sessionId, token;
 
-  await test('GET /health', async () => {
-    const res = await fetch('http://127.0.0.1:3000/health');
+  await test('GET / → service info', async () => {
+    const res = await fetch('http://127.0.0.1:5001/');
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(data.ok, true);
+    assert.strictEqual(data.service, 'proctor-mock-backend');
+  });
+
+  await test('GET /health (legacy)', async () => {
+    const res = await fetch('http://127.0.0.1:5001/health');
+    const data = await res.json();
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(data.ok, true);
+    assert.strictEqual(data.service, 'proctor-mock-backend');
+  });
+
+  await test('GET /api/health (new endpoint)', async () => {
+    const res = await fetch('http://127.0.0.1:5001/api/health');
     const data = await res.json();
     assert.strictEqual(res.status, 200);
     assert.strictEqual(data.ok, true);
@@ -306,12 +345,23 @@ async function runAll() {
     assert.strictEqual(data.inserted, 2);
   });
 
-  // ── Suite D: Full lifecycle validation ────────────────────────────────────
+  // --- New tests for screenshot upload and finalize ---
+  await test('POST /sessions/screenshot → 200 with screenshotUrl', async () => {
+    const { screenshotUrl } = await uploadScreenshot(sessionId);
+    assert.ok(screenshotUrl, 'screenshotUrl must be returned');
+    assert.ok(screenshotUrl.startsWith('http://127.0.0.1:5001/screenshots/'), 'URL must point to served file');
+    // Kiểm tra file có thể truy cập được
+    const fileRes = await fetch(screenshotUrl);
+    assert.strictEqual(fileRes.status, 200);
+    assert.strictEqual(fileRes.headers.get('content-type'), 'image/jpeg');
+  });
+
+  // ── Suite D: Full lifecycle integrity (including screenshot & finalize) ───
   console.log('\n══════════════════════════════════════');
   console.log(' Suite D: Session Lifecycle Integrity');
   console.log('══════════════════════════════════════');
 
-  await test('GET /sessions/:id → snapshot has all recorded data', async () => {
+  await test('GET /sessions/:id → snapshot has all recorded data (before finalize)', async () => {
     const { status, data } = await get(`/sessions/${sessionId}`);
     assert.strictEqual(status, 200);
     assert.strictEqual(data.ok, true);
@@ -323,24 +373,32 @@ async function runAll() {
     assert.strictEqual(snapshot.status, 'active');
   });
 
-  await test('POST /sessions/end → 200 with snapshot', async () => {
-    const { status, data } = await post('/sessions/end', {
+  await test('POST /sessions/finalize → 200 with snapshot and screenshotUrl', async () => {
+    const { screenshotUrl } = await uploadScreenshot(sessionId); // upload fresh screenshot for finalize
+    const { status, data } = await post('/sessions/finalize', {
       sessionId,
-      result: { reason: 'user_clicked_end', endedAt: Date.now() },
+      endedAt: Date.now(),
+      endReason: 'user_clicked_end',
+      screenshotUrl,
+      summary: { roomCode: 'ROOM01', studentName: 'Nguyễn Văn A', score: 95 },
+      triggerBlockchain: true,
       timestamp: Date.now(),
     });
     assert.strictEqual(status, 200);
     assert.strictEqual(data.ok, true);
-    assert.strictEqual(data.snapshot.status, 'ended');
+    assert.strictEqual(data.snapshot.status, 'finalized');
+    assert.strictEqual(data.snapshot.screenshotUrl, screenshotUrl);
+    assert.strictEqual(data.snapshot.endReason, 'user_clicked_end');
+    assert.deepStrictEqual(data.snapshot.summary, { roomCode: 'ROOM01', studentName: 'Nguyễn Văn A', score: 95 });
+  });
+
+  await test('GET /sessions/:id after finalize → status=finalized', async () => {
+    const { data } = await get(`/sessions/${sessionId}`);
+    assert.strictEqual(data.snapshot.status, 'finalized');
     assert.ok(data.snapshot.endedAt, 'endedAt must be set');
   });
 
-  await test('GET /sessions/:id after end → status=ended', async () => {
-    const { data } = await get(`/sessions/${sessionId}`);
-    assert.strictEqual(data.snapshot.status, 'ended');
-  });
-
-  await test('Heartbeat on ended session → still 200 (backend accepts)', async () => {
+  await test('Heartbeat on finalized session → still 200 (backend accepts)', async () => {
     const { status } = await post('/sessions/heartbeat', { sessionId, timestamp: Date.now() });
     assert.strictEqual(status, 200);
   });

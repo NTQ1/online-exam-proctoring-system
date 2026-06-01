@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { Op } from 'sequelize'
+import busboy from 'busboy'
 import ExamRoom from '../models/ExamRoom.js'
 import ExamParticipant from '../models/ExamParticipant.js'
 import MonitoringSession from '../models/MonitoringSession.js'
@@ -13,35 +14,114 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Thư mục gốc của public (backend/public/)
+const PUBLIC_DIR = path.join(__dirname, '../../public')
+
 function jsonResponse(res, statusCode, payload) {
   return res.status(statusCode).json(payload)
 }
 
+function normalizeSessionId(sessionId) {
+  if (!sessionId) return sessionId
+  return String(sessionId).startsWith('session_') ? String(sessionId).replace(/^session_/, '') : sessionId
+}
+
+/**
+ * Lưu ảnh base64 vào public/, trả về URL công khai.
+ * @param {string} base64String   - data URL hoặc bare base64
+ * @param {'screenshots'|'ai-violations'} subDir
+ * @returns {string|null}         - URL dạng /screenshots/<file> hoặc /ai-violations/<file>
+ */
 function saveBase64Image(base64String, subDir = 'ai-violations') {
   if (!base64String) return null
   try {
-    const matches = base64String.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/)
-    if (!matches || matches.length !== 3) {
-      return null
+    let matches = base64String.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/)
+    let extension
+    let imageBuffer
+
+    if (matches && matches.length === 3) {
+      extension = matches[1] === 'jpeg' ? 'jpg' : matches[1]
+      imageBuffer = Buffer.from(matches[2], 'base64')
+    } else {
+      const bare = base64String.replace(/^\s+|\s+$/g, '')
+      if (/^[A-Za-z0-9+/=\s]+$/.test(bare)) {
+        extension = 'jpg'
+        imageBuffer = Buffer.from(bare, 'base64')
+      } else {
+        return null
+      }
     }
-    const extension = matches[1] === 'jpeg' ? 'jpg' : matches[1]
-    const imageBuffer = Buffer.from(matches[2], 'base64')
+
     const fileName = `${Date.now()}_${randomUUID()}.${extension}`
-    const uploadsDir = path.join(__dirname, `../../public/uploads/${subDir}`)
-    
+
+    let uploadsDir
+    let publicUrl
+
+    if (subDir === 'screenshots') {
+      // public/screenshots/<file> → served as /screenshots/<file>
+      uploadsDir = path.join(PUBLIC_DIR, 'screenshots')
+      publicUrl = `/screenshots/${fileName}`
+    } else {
+      // public/ai-violations/<file> → served as /ai-violations/<file>
+      uploadsDir = path.join(PUBLIC_DIR, subDir)
+      publicUrl = `/ai-violations/${fileName}`
+    }
+
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true })
     }
-    
+
     const filePath = path.join(uploadsDir, fileName)
     fs.writeFileSync(filePath, imageBuffer)
-    
-    return `/uploads/${subDir}/${fileName}`
+    console.log(`[Image] Saved ${subDir}: ${filePath} → ${publicUrl}`)
+    return publicUrl
   } catch (error) {
-    console.error('Error saving image:', error)
+    console.error('[Image] Error saving image:', error)
     return null
   }
 }
+
+/**
+ * Parse multipart/form-data với busboy.
+ * Nhận field 'sessionId' và file 'screenshot'.
+ */
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const bb = busboy({ headers: req.headers })
+    let sessionId = null
+    let imageBuffer = null
+    let mimeType = 'image/jpeg'
+
+    bb.on('field', (name, val) => {
+      if (name === 'sessionId') sessionId = val
+    })
+
+    bb.on('file', (name, file, info) => {
+      if (name === 'screenshot') {
+        mimeType = info.mimeType || 'image/jpeg'
+        const chunks = []
+        file.on('data', (chunk) => chunks.push(chunk))
+        file.on('end', () => {
+          imageBuffer = Buffer.concat(chunks)
+        })
+      } else {
+        // Drain unused files
+        file.resume()
+      }
+    })
+
+    bb.on('close', () => {
+      if (!sessionId) return reject(new Error('sessionId missing'))
+      if (!imageBuffer) return reject(new Error('screenshot file missing'))
+      resolve({ sessionId, imageBuffer, mimeType })
+    })
+
+    bb.on('error', reject)
+    req.pipe(bb)
+  })
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
 
 export const handleAuthRoomCode = async (req, res) => {
   try {
@@ -66,17 +146,19 @@ export const handleAuthRoomCode = async (req, res) => {
         room_id: room.id,
         student_name: studentName,
         student_id_string: studentId,
-        status: 'online'
+        status: 'online',
+        joined_at: new Date(),
       })
     } else {
       participant.student_name = studentName
+      participant.status = 'online'
       await participant.save()
     }
 
-    // Create session
+    // Create monitoring session with 'authenticated' status
     const session = await MonitoringSession.create({
       participant_id: participant.id,
-      status: 'active'
+      status: 'authenticated',
     })
 
     const token = randomUUID()
@@ -84,21 +166,25 @@ export const handleAuthRoomCode = async (req, res) => {
     return jsonResponse(res, 200, {
       ok: true,
       token,
-      sessionId: session.id,
+      sessionId: `session_${session.id}`,
       serverUrl: `http://${req.headers.host}`,
-      message: 'Authentication accepted'
+      message: 'Authentication accepted',
     })
   } catch (error) {
+    console.error('[Auth] Error:', error)
     return jsonResponse(res, 500, { ok: false, message: error.message })
   }
 }
+
+// ─── Session lifecycle ────────────────────────────────────────────────────────
 
 export const handleStartSession = async (req, res) => {
   try {
     const { sessionId, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     session.status = 'active'
@@ -116,7 +202,8 @@ export const handleEndSession = async (req, res) => {
     const { sessionId, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     session.status = 'ended'
@@ -131,26 +218,31 @@ export const handleEndSession = async (req, res) => {
 
 export const handleFinalizeSession = async (req, res) => {
   try {
-    const { sessionId, endedAt, endReason, screenshotDataUrl, triggerBlockchain, timestamp } = req.body
+    const { sessionId, endedAt, endReason, screenshotDataUrl, screenshotUrl, triggerBlockchain, summary, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
-    const imagePath = saveBase64Image(screenshotDataUrl, 'screenshots')
+    // screenshotUrl: URL đã upload trước (extension gửi URL sau khi uploadScreenshot)
+    // screenshotDataUrl: base64 fallback (nếu extension gửi thẳng base64)
+    let finalScreenshotUrl = screenshotUrl || null
+    if (!finalScreenshotUrl && screenshotDataUrl) {
+      finalScreenshotUrl = saveBase64Image(screenshotDataUrl, 'screenshots')
+    }
 
     session.status = 'finalized'
     session.end_time = endedAt ? new Date(endedAt) : (timestamp ? new Date(timestamp) : new Date())
-    session.end_reason = endReason
-    session.screenshot_url = imagePath
+    session.end_reason = endReason || null
+    session.screenshot_url = finalScreenshotUrl
     session.trigger_blockchain = triggerBlockchain || false
     await session.save()
 
     // ── Blockchain logic ──
-    // Query high-severity violations (LOG_VIOLATION with severity='high' OR ai_violation type)
     const highViolations = await ViolationEvent.findAll({
       where: {
-        session_id: sessionId,
+        session_id: id,
         [Op.or]: [
           { severity: 'high' },
           { type: 'ai_violation' },
@@ -160,7 +252,6 @@ export const handleFinalizeSession = async (req, res) => {
     })
 
     if (highViolations.length === 0) {
-      // Không có vi phạm nghiêm trọng → verdict: clean
       session.verdict = 'clean'
       await session.save()
       return jsonResponse(res, 200, {
@@ -171,14 +262,13 @@ export const handleFinalizeSession = async (req, res) => {
       })
     }
 
-    // Có vi phạm nghiêm trọng → push blockchain
     session.verdict = 'violated'
     await session.save()
 
     let blockchainResult = null
     if (triggerBlockchain) {
       try {
-        blockchainResult = await pushToBlockchain(sessionId, highViolations)
+        blockchainResult = await pushToBlockchain(id, highViolations)
       } catch (err) {
         console.error('[Finalize] Blockchain push error:', err.message)
         blockchainResult = { status: 'failed', error: err.message }
@@ -197,18 +287,56 @@ export const handleFinalizeSession = async (req, res) => {
   }
 }
 
+// ─── Screenshot upload (multipart/form-data) ─────────────────────────────────
+
+export const handleUploadScreenshot = async (req, res) => {
+  try {
+    const { sessionId, imageBuffer, mimeType } = await parseMultipart(req)
+
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
+    if (!session) {
+      return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
+    }
+
+    // Lưu vào public/screenshots/
+    const ext = mimeType.includes('png') ? 'png' : 'jpg'
+    const fileName = `${Date.now()}_${randomUUID()}.${ext}`
+    const uploadsDir = path.join(PUBLIC_DIR, 'screenshots')
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
+
+    const filePath = path.join(uploadsDir, fileName)
+    fs.writeFileSync(filePath, imageBuffer)
+
+    const protocol = req.protocol || 'http'
+    const host = req.headers.host || 'localhost:5001'
+    const screenshotUrl = `${protocol}://${host}/screenshots/${fileName}`
+
+    // Cập nhật session
+    session.screenshot_url = `/screenshots/${fileName}`
+    await session.save()
+
+    console.log(`[Screenshot] Saved: ${filePath} → ${screenshotUrl}`)
+    return jsonResponse(res, 200, { ok: true, screenshotUrl })
+  } catch (err) {
+    console.error('[Screenshot] Upload error:', err.message)
+    return jsonResponse(res, 400, { ok: false, message: err.message })
+  }
+}
+
+// ─── Heartbeat ────────────────────────────────────────────────────────────────
+
 export const handleHeartbeat = async (req, res) => {
   try {
     const { sessionId, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     const heartbeats = session.heartbeats || []
     heartbeats.push(timestamp || Date.now())
-    
-    // Sequelize JSON arrays need to be re-assigned or use changed()
     session.heartbeats = heartbeats
     session.changed('heartbeats', true)
     await session.save()
@@ -219,21 +347,24 @@ export const handleHeartbeat = async (req, res) => {
   }
 }
 
+// ─── Violations ───────────────────────────────────────────────────────────────
+
 export const handleViolationReport = async (req, res) => {
   try {
     const { sessionId, violationType, timestamp, details } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     const violation = await ViolationEvent.create({
       participant_id: session.participant_id,
-      session_id: sessionId,
+      session_id: id,
       type: violationType,
       severity: req.body.severity || null,
       details: details || {},
-      timestamp: timestamp ? new Date(timestamp) : new Date()
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
     })
 
     return jsonResponse(res, 200, { ok: true, sessionId, violationId: violation.id })
@@ -247,16 +378,18 @@ export const handleViolationBatch = async (req, res) => {
     const { sessionId, violations } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     if (Array.isArray(violations)) {
       const records = violations.map(v => ({
         participant_id: session.participant_id,
-        session_id: sessionId,
+        session_id: id,
         type: v.violationType || v.type || 'UNKNOWN',
+        severity: v.severity || null,
         details: v.details || {},
-        timestamp: v.timestamp ? new Date(v.timestamp) : new Date()
+        timestamp: v.timestamp ? new Date(v.timestamp) : new Date(),
       }))
       await ViolationEvent.bulkCreate(records)
     }
@@ -267,45 +400,94 @@ export const handleViolationBatch = async (req, res) => {
   }
 }
 
+/**
+ * POST /api/violations
+ * Log một vi phạm với format { sessionId, type, feature, severity, timestamp, details }
+ */
+export const handleLogViolation = async (req, res) => {
+  try {
+    const { sessionId, type, feature, timestamp, severity, details } = req.body
+    if (!sessionId || !type) return jsonResponse(res, 400, { ok: false, message: 'sessionId and type are required' })
+
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
+    if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
+
+    const violation = await ViolationEvent.create({
+      participant_id: session.participant_id,
+      session_id: id,
+      type,
+      severity: severity || 'warning',
+      details: { feature, ...(details || {}) },
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
+    })
+
+    return jsonResponse(res, 200, { ok: true, sessionId, violationId: violation.id, count: 1 })
+  } catch (error) {
+    return jsonResponse(res, 500, { ok: false, message: error.message })
+  }
+}
+
+/**
+ * POST /api/ai-violations
+ * Nhận { sessionId, detections, imageDataUrl, timestamp }
+ * Lưu ảnh vào public/ai-violations/, ghi ViolationEvent type='ai_violation'
+ */
 export const handleAIViolation = async (req, res) => {
   try {
     const { sessionId, detections, imageDataUrl, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
-    const imagePath = saveBase64Image(imageDataUrl)
+    // Lưu ảnh vào public/ai-violations/
+    const imageUrl = saveBase64Image(imageDataUrl, 'ai-violations')
 
     const violation = await ViolationEvent.create({
       participant_id: session.participant_id,
-      session_id: sessionId,
+      session_id: id,
       type: 'ai_violation',
-      details: { detections },
-      image_path: imagePath,
-      timestamp: timestamp ? new Date(timestamp) : new Date()
+      severity: 'high',
+      details: { detections: detections || [] },
+      image_url: imageUrl,
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
     })
 
-    return jsonResponse(res, 200, { ok: true, sessionId, violationId: violation.id })
+    const classes = (detections || []).map(d => `${d.className}(${(d.confidence * 100).toFixed(1)}%)`).join(', ')
+    console.log(`[AI-Violation] session=${id.slice(0, 8)}... classes=${classes} image=${imageUrl || 'none'}`)
+
+    return jsonResponse(res, 200, {
+      ok: true,
+      sessionId,
+      violationId: violation.id,
+      count: 1,
+      hasImage: !!imageUrl,
+    })
   } catch (error) {
     return jsonResponse(res, 500, { ok: false, message: error.message })
   }
 }
+
+// ─── Disconnect & Offline Logs ────────────────────────────────────────────────
 
 export const handleDisconnect = async (req, res) => {
   try {
     const { sessionId, reason, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     await ViolationEvent.create({
       participant_id: session.participant_id,
-      session_id: sessionId,
+      session_id: id,
       type: 'disconnect',
+      severity: 'warning',
       details: { reason },
-      timestamp: timestamp ? new Date(timestamp) : new Date()
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
     })
 
     return jsonResponse(res, 200, { ok: true, sessionId })
@@ -319,7 +501,8 @@ export const handleOfflineLogs = async (req, res) => {
     const { sessionId, logs } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
-    const session = await MonitoringSession.findByPk(sessionId)
+    const id = normalizeSessionId(sessionId)
+    const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
     if (Array.isArray(logs)) {
@@ -332,10 +515,11 @@ export const handleOfflineLogs = async (req, res) => {
         } else {
           violations.push({
             participant_id: session.participant_id,
-            session_id: sessionId,
+            session_id: id,
             type: log.violationType || log.type || 'offline_violation',
+            severity: log.severity || 'warning',
             details: log.details || {},
-            timestamp: log.timestamp ? new Date(log.timestamp) : new Date()
+            timestamp: log.timestamp ? new Date(log.timestamp) : new Date(),
           })
         }
       }
@@ -355,31 +539,45 @@ export const handleOfflineLogs = async (req, res) => {
   }
 }
 
+// ─── Get Session ──────────────────────────────────────────────────────────────
+
 export const handleGetSession = async (req, res) => {
   try {
     const { sessionId } = req.params
-    const session = await MonitoringSession.findByPk(sessionId, {
-      include: ['participant', 'violations']
+    const id = normalizeSessionId(sessionId)
+
+    const session = await MonitoringSession.findByPk(id, {
+      include: [
+        { association: 'participant' },
+        { association: 'violations', order: [['timestamp', 'ASC']] },
+      ],
     })
-    
+
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
-    return jsonResponse(res, 200, { ok: true, snapshot: session })
+    const data = session.toJSON()
+    return jsonResponse(res, 200, {
+      ok: true,
+      snapshot: {
+        ...data,
+        aiViolations: (data.violations || []).filter(v => v.type === 'ai_violation'),
+        aiViolationCount: (data.violations || []).filter(v => v.type === 'ai_violation').length,
+      },
+    })
   } catch (error) {
     return jsonResponse(res, 500, { ok: false, message: error.message })
   }
 }
 
-/**
- * GET /api/sessions/:sessionId/blockchain
- * Trả về blockchain record + verify tính toàn vẹn dữ liệu.
- */
+// ─── Blockchain Record ────────────────────────────────────────────────────────
+
 export const handleGetBlockchainRecord = async (req, res) => {
   try {
     const { sessionId } = req.params
+    const id = normalizeSessionId(sessionId)
 
     const record = await BlockchainRecord.findOne({
-      where: { session_id: sessionId },
+      where: { session_id: id },
       order: [['createdAt', 'DESC']],
     })
 
@@ -387,11 +585,10 @@ export const handleGetBlockchainRecord = async (req, res) => {
       return jsonResponse(res, 404, { ok: false, message: 'No blockchain record found for this session' })
     }
 
-    // Verify on-chain integrity
     let verification = { match: false, reason: 'Verification skipped' }
     if (record.status === 'confirmed' && record.tx_hash) {
       try {
-        verification = await verifySession(sessionId)
+        verification = await verifySession(id)
       } catch (err) {
         verification = { match: false, reason: `Verification failed: ${err.message}` }
       }

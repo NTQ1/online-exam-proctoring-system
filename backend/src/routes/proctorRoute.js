@@ -7,11 +7,13 @@ import {
   handleHeartbeat,
   handleViolationReport,
   handleViolationBatch,
+  handleLogViolation,
   handleAIViolation,
   handleDisconnect,
   handleOfflineLogs,
+  handleUploadScreenshot,
   handleGetSession,
-  handleGetBlockchainRecord
+  handleGetBlockchainRecord,
 } from '../controllers/proctorController.js'
 
 const router = express.Router()
@@ -24,11 +26,12 @@ router.post('/sessions/start', handleStartSession)
 router.post('/sessions/end', handleEndSession)
 router.post('/sessions/finalize', handleFinalizeSession)
 router.post('/sessions/heartbeat', handleHeartbeat)
+router.post('/sessions/screenshot', handleUploadScreenshot)  // multipart/form-data
 
 // Violations
 router.post('/violations/report', handleViolationReport)
 router.post('/violations/batch', handleViolationBatch)
-router.post('/violations', handleViolationReport) // Alias used by extension
+router.post('/violations', handleLogViolation)   // LOG_VIOLATION từ extension
 router.post('/ai-violations', handleAIViolation)
 
 // Other

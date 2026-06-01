@@ -23,8 +23,13 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 5001
 
-// Serve static files (for AI violation images)
+// Serve static files từ public/:
+//  - /screenshots/<file>          → public/screenshots/<file>
+//  - /ai-violations/<file>         → public/ai-violations/<file>
 app.use(express.static(path.join(__dirname, '../public')))
+app.use('/screenshots', express.static(path.join(__dirname, '../public/screenshots')))
+app.use('/ai-violations', express.static(path.join(__dirname, '../public/ai-violations')))
+app.use('/uploads/ai-violations', express.static(path.join(__dirname, '../public/ai-violations')))
 
 //middleware
 app.use(express.json({ limit: '50mb' }))

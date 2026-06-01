@@ -10,18 +10,12 @@ node backend/mock-backend.mjs
 
 Mặc định server chạy tại:
 
-- `http://127.0.0.1:3000`
+- `http://127.0.0.1:5001`
 
 ## Endpoint hỗ trợ
 
-- `GET /health`
-- `POST /api/auth/room-code`
-- `POST /api/sessions/start`
-- `POST /api/sessions/end`
-- `POST /api/sessions/heartbeat`
-- `POST /api/violations/report`
-- `POST /api/violations/batch`
-- `GET /api/sessions/:sessionId`
+
+Nếu đang chạy mock backend, mở `http://127.0.0.1:5001/` để xem trạng thái service thay vì gặp `Not found`.
 
 ## Contract giả
 
@@ -44,7 +38,7 @@ Response:
   "ok": true,
   "token": "token_...",
   "sessionId": "session_...",
-  "serverUrl": "http://localhost:3000"
+  "serverUrl": "http://localhost:5001"
 }
 ```
 

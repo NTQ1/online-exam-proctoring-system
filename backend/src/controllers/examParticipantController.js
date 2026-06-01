@@ -1,5 +1,7 @@
 import ExamParticipant from '../models/ExamParticipant.js'
 import ExamRoom from '../models/ExamRoom.js'
+import MonitoringSession from '../models/MonitoringSession.js'
+import ViolationEvent from '../models/ViolationEvent.js'
 import crypto from 'crypto'
 
 // Sinh viên join phòng thi (không cần đăng nhập)
@@ -35,7 +37,7 @@ export const joinExamRoom = async (req, res) => {
       return res.status(400).json({ message: 'MSSV này đã tham gia phòng thi rồi' })
     }
 
-   // Tạo record tham gia
+    // Tạo record tham gia
     const participant = await ExamParticipant.create({
       room_id: room.id,
       student_name,
@@ -46,10 +48,12 @@ export const joinExamRoom = async (req, res) => {
 
     // Token dùng để extension xác thực các request tiếp theo
     const token = crypto.randomUUID()
+    const sessionId = `session_${crypto.randomUUID()}`
 
     return res.status(201).json({
       message: 'Tham gia phòng thi thành công',
       token,
+      sessionId,
       participantId: participant.id,
       serverUrl: process.env.SERVER_URL,
       participant,
@@ -67,6 +71,7 @@ export const joinExamRoom = async (req, res) => {
 }
 
 // Lấy danh sách sinh viên trong phòng thi (dành cho giảng viên)
+// Trả về format: { participants: [{ id, student_name, student_id_string, status, joined_at, sessions: [...] }] }
 export const getParticipants = async (req, res) => {
   try {
     const { id } = req.params
@@ -80,7 +85,23 @@ export const getParticipants = async (req, res) => {
 
     const participants = await ExamParticipant.findAll({
       where: { room_id: id },
-      order: [['joined_at', 'ASC']]
+      order: [['joined_at', 'ASC']],
+      include: [
+        {
+          model: MonitoringSession,
+          as: 'sessions',
+          required: false,
+          order: [['createdAt', 'ASC']],
+          include: [
+            {
+              model: ViolationEvent,
+              as: 'violations',
+              required: false,
+              order: [['timestamp', 'ASC']],
+            },
+          ],
+        },
+      ],
     })
 
     return res.status(200).json({ participants })

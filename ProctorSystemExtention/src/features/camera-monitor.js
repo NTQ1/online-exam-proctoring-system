@@ -3,7 +3,12 @@
  * Dùng chrome.runtime.sendMessage trực tiếp (không cần Extension ID).
  */
 
-const CAMERA_INTERVAL_MS = 1000;
+if (window.__CAMERA_MONITOR_INSTALLED) {
+  console.warn('[CameraMonitor] Already installed, skipping');
+} else {
+  window.__CAMERA_MONITOR_INSTALLED = true;
+
+  const CAMERA_INTERVAL_MS = 1000;
 const MODEL_READY_POLL_MS = 2000;
 const MODEL_READY_TIMEOUT_MS = 120000;
 const CAPTURE_WIDTH = 640;
@@ -366,6 +371,7 @@ function stopCameraMonitor() {
   canvasEl?.remove();
   videoEl = canvasEl = overlayCanvas = null;
   frameInFlight = false;
+  delete window.__CAMERA_MONITOR_INSTALLED;
   console.log(`[CameraMonitor] Stopped. Violations=${violationCount}, Frames=${frameCounter}`);
 }
 
@@ -389,3 +395,4 @@ window.__cameraMonitor = {
 };
 
 startCameraMonitor();
+}

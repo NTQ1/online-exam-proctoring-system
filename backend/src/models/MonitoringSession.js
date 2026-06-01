@@ -17,9 +17,9 @@ const MonitoringSession = sequelize.define('MonitoringSession', {
     },
   },
   status: {
-    type: DataTypes.ENUM('active', 'ended', 'finalized'),
+    type: DataTypes.ENUM('authenticated', 'active', 'ended', 'finalized'),
     allowNull: false,
-    defaultValue: 'active',
+    defaultValue: 'authenticated',
   },
   start_time: {
     type: DataTypes.DATE,
@@ -55,7 +55,5 @@ const MonitoringSession = sequelize.define('MonitoringSession', {
   tableName: 'monitoring_sessions',
   timestamps: true,
 })
-
-MonitoringSession.belongsTo(ExamParticipant, { foreignKey: 'participant_id', as: 'participant' })
 
 export default MonitoringSession

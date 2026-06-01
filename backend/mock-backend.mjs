@@ -1,8 +1,16 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { writeFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import 'dotenv/config';
+import busboy from 'busboy';
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 5001);
 const HOST = process.env.HOST || '127.0.0.1';
+const SCREENSHOT_DIR = join(process.cwd(), 'screenshots');
+
+// Đảm bảo thư mục lưu ảnh tồn tại
+await mkdir(SCREENSHOT_DIR, { recursive: true });
 
 const sessions = new Map();
 const authRecords = new Map();
@@ -45,6 +53,40 @@ function parseBody(req) {
   });
 }
 
+/**
+ * Xử lý multipart/form-data (chỉ nhận field `screenshot` và `sessionId`)
+ * Trả về { sessionId, imageBuffer, filename }
+ */
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const bb = busboy({ headers: req.headers });
+    let sessionId = null;
+    let imageBuffer = null;
+
+    bb.on('field', (name, val) => {
+      if (name === 'sessionId') sessionId = val;
+    });
+
+    bb.on('file', (name, file, info) => {
+      if (name === 'screenshot') {
+        const chunks = [];
+        file.on('data', (chunk) => chunks.push(chunk));
+        file.on('end', () => {
+          imageBuffer = Buffer.concat(chunks);
+        });
+      }
+    });
+
+    bb.on('close', () => {
+      if (!sessionId) return reject(new Error('sessionId missing'));
+      if (!imageBuffer) return reject(new Error('screenshot file missing'));
+      resolve({ sessionId, imageBuffer });
+    });
+
+    req.pipe(bb);
+  });
+}
+
 function createToken(prefix) {
   return `${prefix}_${randomUUID()}`;
 }
@@ -53,21 +95,23 @@ function buildSessionSnapshot(sessionId) {
   const session = sessions.get(sessionId);
   if (!session) return null;
   return {
-    sessionId:    session.sessionId,
-    roomCode:     session.roomCode,
-    studentName:  session.studentName,
-    studentId:    session.studentId,
-    status:       session.status,
-    startedAt:    session.startedAt,
-    endedAt:      session.endedAt,
-    tabs:         session.tabs,
-    client:       session.client,
-    authToken:    session.authToken,
-    updatedAt:    session.updatedAt,
-    endPayload:   session.endPayload || null,
-    violations:   session.violations,
-    heartbeats:   session.heartbeats,
-    // AI Detection violations (phone / student cheating — với ảnh chụp)
+    sessionId: session.sessionId,
+    roomCode: session.roomCode,
+    studentName: session.studentName,
+    studentId: session.studentId,
+    status: session.status,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    endReason: session.endReason || null,
+    screenshotUrl: session.screenshotUrl || null,
+    summary: session.summary || null,
+    tabs: session.tabs,
+    client: session.client,
+    authToken: session.authToken,
+    updatedAt: session.updatedAt,
+    endPayload: session.endPayload || null,
+    violations: session.violations,
+    heartbeats: session.heartbeats,
     aiViolations: session.aiViolations || [],
     aiViolationCount: (session.aiViolations || []).length,
   };
@@ -87,7 +131,7 @@ async function handleAuthRoomCode(req, res) {
 
   const sessionId = createToken('session');
   const token = createToken('token');
-  const serverUrl = `http://localhost:${PORT}`;
+  const serverUrl = `http://${HOST}:${PORT}`;
 
   authRecords.set(sessionId, {
     sessionId,
@@ -192,7 +236,15 @@ async function handleEndSession(req, res) {
 
 async function handleFinalizeSession(req, res) {
   const body = await parseBody(req);
-  const { sessionId, endedAt, endReason, screenshotDataUrl, summary, triggerBlockchain, timestamp } = body;
+  const {
+    sessionId,
+    endedAt,
+    endReason,
+    screenshotUrl,       
+    summary,
+    triggerBlockchain,
+    timestamp,
+  } = body;
 
   if (!sessionId) {
     jsonResponse(res, 400, { ok: false, message: 'sessionId is required' });
@@ -208,7 +260,7 @@ async function handleFinalizeSession(req, res) {
   session.status = 'finalized';
   session.endedAt = endedAt || timestamp || Date.now();
   session.endReason = endReason;
-  session.screenshotDataUrl = screenshotDataUrl || null;
+  session.screenshotUrl = screenshotUrl || null;        // 👈 lưu URL
   session.summary = summary || {};
   session.triggerBlockchain = triggerBlockchain || false;
   session.updatedAt = Date.now();
@@ -222,6 +274,35 @@ async function handleFinalizeSession(req, res) {
     snapshot,
     message: 'Session finalized and blockchain triggered (mocked)',
   });
+}
+
+/**
+ * POST /api/sessions/screenshot
+ * Nhận multipart: file "screenshot", field "sessionId"
+ * Trả về { screenshotUrl: "http://.../screenshots/<uuid>.jpg" }
+ */
+async function handleUploadScreenshot(req, res) {
+  try {
+    const { sessionId, imageBuffer } = await parseMultipart(req);
+    const session = sessions.get(sessionId);
+    if (!session) {
+      jsonResponse(res, 404, { ok: false, message: 'Session not found' });
+      return;
+    }
+
+    const filename = `${randomUUID()}.jpg`;
+    const filepath = join(SCREENSHOT_DIR, filename);
+    await writeFile(filepath, imageBuffer);
+
+    const screenshotUrl = `http://${HOST}:${PORT}/screenshots/${filename}`;
+    // Lưu vào session nếu cần
+    session.lastScreenshotUrl = screenshotUrl;
+    session.updatedAt = Date.now();
+
+    jsonResponse(res, 200, { ok: true, screenshotUrl });
+  } catch (err) {
+    jsonResponse(res, 400, { ok: false, message: err.message });
+  }
 }
 
 async function handleHeartbeat(req, res) {
@@ -394,7 +475,7 @@ async function handleOfflineLogs(req, res) {
   }
 
   const normalized = Array.isArray(logs) ? logs : [];
-  
+
   for (const log of normalized) {
     if (log.type === 'VIOLATION' || log.violationType) {
       session.violations.push({
@@ -418,15 +499,6 @@ async function handleOfflineLogs(req, res) {
   });
 }
 
-// ─── AI Violations ────────────────────────────────────────────────────────────
-
-/**
- * POST /api/ai-violations
- * Body: { sessionId, detections[], imageDataUrl, timestamp }
- *
- * Detections schema:
- *   [{ className, confidence, bbox: {x1,y1,x2,y2}, isViolation, isLogOnly }]
- */
 async function handleAIViolation(req, res) {
   const body = await parseBody(req);
   const { sessionId, detections = [], imageDataUrl, timestamp } = body;
@@ -442,26 +514,22 @@ async function handleAIViolation(req, res) {
     return;
   }
 
-  // Khởi tạo mảng aiViolations nếu chưa có
   if (!session.aiViolations) session.aiViolations = [];
 
   const violation = {
-    id:           createToken('ai-v'),
+    id: createToken('ai-v'),
     detections,
-    imageDataUrl: imageDataUrl || null, // base64 JPEG
-    timestamp:    timestamp || Date.now(),
+    imageDataUrl: imageDataUrl || null,
+    timestamp: timestamp || Date.now(),
   };
 
   session.aiViolations.push(violation);
   session.updatedAt = Date.now();
 
-  // ── In log đẹp ra console ────────────────────────────────────────────────
-  const ts  = new Date(violation.timestamp).toLocaleTimeString('vi-VN');
-  const cls = detections.map(d =>
-    `${d.className}(${(d.confidence * 100).toFixed(1)}%)`
-  ).join(', ');
+  const ts = new Date(violation.timestamp).toLocaleTimeString('vi-VN');
+  const cls = detections.map(d => `${d.className}(${(d.confidence * 100).toFixed(1)}%)`).join(', ');
   const hasImg = !!imageDataUrl;
-  const imgKB  = hasImg ? Math.round(imageDataUrl.length * 0.75 / 1024) : 0;
+  const imgKB = hasImg ? Math.round(imageDataUrl.length * 0.75 / 1024) : 0;
 
   console.log(
     `\n\x1b[41m\x1b[37m 🚨 AI VIOLATION \x1b[0m` +
@@ -472,11 +540,11 @@ async function handleAIViolation(req, res) {
   );
 
   jsonResponse(res, 200, {
-    ok:          true,
+    ok: true,
     sessionId,
     violationId: violation.id,
-    count:       session.aiViolations.length,
-    hasImage:    hasImg,
+    count: session.aiViolations.length,
+    hasImage: hasImg,
   });
 }
 
@@ -486,7 +554,6 @@ function handleGetSession(req, res, sessionId) {
     jsonResponse(res, 404, { ok: false, message: 'Session not found' });
     return;
   }
-
   jsonResponse(res, 200, {
     ok: true,
     snapshot: buildSessionSnapshot(sessionId),
@@ -501,6 +568,31 @@ function handleHealth(req, res) {
     sessions: sessions.size,
     authRecords: authRecords.size,
     now: Date.now(),
+  });
+}
+
+function handleRoot(req, res) {
+  jsonResponse(res, 200, {
+    ok: true,
+    service: 'proctor-mock-backend',
+    port: PORT,
+    endpoints: [
+      '/health',
+      '/api/health',
+      '/api/auth/room-code',
+      '/api/sessions/start',
+      '/api/sessions/end',
+      '/api/sessions/finalize',
+      '/api/sessions/heartbeat',
+      '/api/sessions/screenshot',
+      '/api/violations/report',
+      '/api/violations/batch',
+      '/api/violations',
+      '/api/session/disconnect',
+      '/api/offline-logs',
+      '/api/ai-violations',
+      '/api/sessions/:sessionId',
+    ],
   });
 }
 
@@ -527,7 +619,27 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
 
   try {
-    if (req.method === 'GET' && pathname === '/health') {
+    // Cung cấp file ảnh tĩnh từ thư mục screenshots
+    if (req.method === 'GET' && pathname.startsWith('/screenshots/')) {
+      const fs = await import('node:fs/promises');
+      const filePath = join(SCREENSHOT_DIR, pathname.slice('/screenshots/'.length));
+      try {
+        const data = await fs.readFile(filePath);
+        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+        res.end(data);
+      } catch {
+        res.writeHead(404);
+        res.end();
+      }
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/') {
+      handleRoot(req, res);
+      return;
+    }
+
+    if (req.method === 'GET' && (pathname === '/health' || pathname === '/api/health')) {
       handleHealth(req, res);
       return;
     }
@@ -554,6 +666,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && pathname === '/api/sessions/heartbeat') {
       await handleHeartbeat(req, res);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/sessions/screenshot') {
+      await handleUploadScreenshot(req, res);
       return;
     }
 
@@ -606,18 +723,21 @@ server.listen(PORT, HOST, () => {
   console.log(`Proctor mock backend running at http://${HOST}:${PORT}`);
   console.log('Available endpoints:');
   console.log('  GET  /health');
+  console.log('  GET  /api/health');
   console.log('  POST /api/auth/room-code');
   console.log('  POST /api/sessions/start');
   console.log('  POST /api/sessions/end');
   console.log('  POST /api/sessions/finalize');
   console.log('  POST /api/sessions/heartbeat');
+  console.log('  POST /api/sessions/screenshot');
   console.log('  POST /api/violations/report');
   console.log('  POST /api/violations/batch');
   console.log('  POST /api/violations');
   console.log('  POST /api/session/disconnect');
   console.log('  POST /api/offline-logs');
-  console.log('  POST /api/ai-violations       ');
+  console.log('  POST /api/ai-violations');
   console.log('  GET  /api/sessions/:sessionId');
+  console.log('  GET  /screenshots/:filename (phục vụ ảnh đã upload)');
 });
 
 process.on('SIGINT', () => {

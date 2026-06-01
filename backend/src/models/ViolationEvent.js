@@ -1,7 +1,6 @@
 import { DataTypes } from 'sequelize'
 import { sequelize } from '../config/database.js'
 import ExamParticipant from './ExamParticipant.js'
-import MonitoringSession from './MonitoringSession.js'
 
 const ViolationEvent = sequelize.define('ViolationEvent', {
   id: {
@@ -21,7 +20,7 @@ const ViolationEvent = sequelize.define('ViolationEvent', {
     type: DataTypes.UUID,
     allowNull: false,
     references: {
-      model: MonitoringSession,
+      model: 'monitoring_sessions',
       key: 'id',
     },
   },
@@ -41,6 +40,10 @@ const ViolationEvent = sequelize.define('ViolationEvent', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  image_url: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
   timestamp: {
     type: DataTypes.DATE,
     allowNull: false,
@@ -50,8 +53,5 @@ const ViolationEvent = sequelize.define('ViolationEvent', {
   tableName: 'violation_events',
   timestamps: true,
 })
-
-ViolationEvent.belongsTo(ExamParticipant, { foreignKey: 'participant_id', as: 'participant' })
-ViolationEvent.belongsTo(MonitoringSession, { foreignKey: 'session_id', as: 'session' })
 
 export default ViolationEvent
