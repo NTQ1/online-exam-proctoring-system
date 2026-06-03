@@ -66,6 +66,7 @@ function getContentState() {
 // monitoring features initialization is now handled securely in background.js
 
 bootstrap();
+attachMainWorldBridge();
 
 async function bootstrap() {
   const state = getContentState();
@@ -484,6 +485,57 @@ function removeOverlay() {
   isCleaningUp = false;
   disposeContentScript();
   logger.info('Overlay cleanup complete');
+}
+
+/**
+ * Bridge: MAIN world → ISOLATED world → background.
+ *
+ * MAIN world (feature modules) không có chrome.runtime API nên dùng
+ * window.postMessage để gửi message qua ISOLATED world (content.js).
+ * Content.js nhận, forward qua chrome.runtime.sendMessage, rồi gửi
+ * response ngược về MAIN world qua postMessage.
+ *
+ * Bảo mật: chỉ xử lý message có __proctorBridge === true và direction === 'request'.
+ * Trang web không thể giả mạo vì không biết field này.
+ */
+function attachMainWorldBridge() {
+  window.addEventListener('message', (event) => {
+    // Chỉ nhận message từ cùng window (không phải iframe hay external)
+    if (event.source !== window) return;
+    if (event.data?.__proctorBridge !== true) return;
+    if (event.data?.direction !== 'request') return;
+
+    const { messageId, payload } = event.data;
+    if (!messageId || !payload) return;
+
+    try {
+      chrome.runtime.sendMessage(payload, (response) => {
+        // Tiêu thụ lastError để tránh Chrome throw unchecked error
+        const lastErr = chrome.runtime.lastError;
+        if (lastErr) {
+          logger.debug('Bridge sendMessage error', lastErr.message);
+        }
+
+        // Gửi response về MAIN world
+        window.postMessage({
+          __proctorBridge: true,
+          direction: 'response',
+          messageId,
+          response: response || null,
+        }, '*');
+      });
+    } catch (err) {
+      logger.warn('Bridge sendMessage threw', err.message);
+      window.postMessage({
+        __proctorBridge: true,
+        direction: 'response',
+        messageId,
+        response: null,
+      }, '*');
+    }
+  });
+
+  logger.debug('Main-world bridge attached');
 }
 
 function disposeContentScript() {

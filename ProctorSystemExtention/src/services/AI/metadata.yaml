@@ -1,6 +1,6 @@
-description: Ultralytics best model trained on /content/Cheating-2/data.yaml
+description: Ultralytics best model trained on /content/CheatV1-1/data.yaml
 author: Ultralytics
-date: '2026-05-30T03:09:21.029725'
+date: '2026-05-30T10:01:32.487029'
 version: 8.4.56
 license: AGPL-3.0 License (https://ultralytics.com/license)
 docs: https://docs.ultralytics.com
@@ -14,6 +14,7 @@ names:
   0: person
   1: phone
   2: student cheating
+  3: student-not-cheating
 args:
   data: null
   batch: 1

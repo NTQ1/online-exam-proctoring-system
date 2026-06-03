@@ -34,8 +34,24 @@ app.use(express.json({ limit: '50mb' }))
 app.use(cookieParser())
 
 app.use(cors({
-  origin: process.env.CLIENT_URL,
-  credentials: true
+  origin: (origin, callback) => {
+    // Cho phép requests không có origin (server-to-server, Postman, curl)
+    if (!origin) return callback(null, true)
+
+    const allowedOrigins = [
+      process.env.CLIENT_URL,
+      'http://localhost:5173',  // Vite dev server
+      'http://localhost:3000',  // fallback dev
+    ].filter(Boolean)
+
+    // Cho phép tất cả chrome-extension:// origins (browser extension cùng thiết bị)
+    if (origin.startsWith('chrome-extension://') || allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
+
+    return callback(new Error(`CORS: origin ${origin} not allowed`))
+  },
+  credentials: true,
 }))
 
 // public routes

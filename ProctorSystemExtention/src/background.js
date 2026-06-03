@@ -736,23 +736,45 @@ async function injectOverlay(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId },
     world: 'MAIN',
-    args: [extensionBaseUrl, session.sessionId, session.activeTabId, chrome.runtime.id],
-    func: async (baseUrl, sessionId, activeTabId, extId) => {
+    args: [extensionBaseUrl, session.sessionId, session.activeTabId],
+    func: async (baseUrl, sessionId, activeTabId) => {
       try {
         if (sessionId) {
           window.__proctoringSession = { sessionId, tabId: activeTabId };
         }
 
         window.__extSendMessage = function (message, callback) {
-          try {
-            chrome.runtime.sendMessage(
-              extId,
-              message,
-              callback || function () { chrome.runtime.lastError; }
-            );
-          } catch (err) {
-            // Silently ignore if runtime is unavailable
-          }
+          // MAIN world KHÔNG có chrome.runtime — phải dùng window.postMessage
+          // để chuyển message sang ISOLATED world (content.js), nơi có chrome.runtime.
+          const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+          message._bridgeId = messageId;
+
+          const responseHandler = (event) => {
+            if (
+              event.source === window &&
+              event.data?.__proctorBridge === true &&
+              event.data?.direction === 'response' &&
+              event.data?.messageId === messageId
+            ) {
+              window.removeEventListener('message', responseHandler);
+              if (callback) callback(event.data.response);
+            }
+          };
+
+          window.addEventListener('message', responseHandler);
+
+          window.postMessage({
+            __proctorBridge: true,
+            direction: 'request',
+            messageId,
+            payload: message,
+          }, '*');
+
+          // Timeout fallback — tránh leak listener nếu content script không response
+          setTimeout(() => {
+            window.removeEventListener('message', responseHandler);
+            if (callback) callback(null);
+          }, 5000);
         };
 
         const moduleURLs = {
@@ -1214,35 +1236,59 @@ onMessage({
 });
 
 // ── AI message handler (raw listener — camera-monitor gửi flat message) ──
+// Dùng raw listener riêng thay vì onMessage wrapper vì các message này
+// không dùng envelope format (không có field .type trong envelope.type)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Chỉ xử lý message từ chính extension (content scripts trong tab đang giám sát)
+  if (sender?.id && sender.id !== chrome.runtime.id) return false;
+
   if (message?.type === 'AI_FRAME' && message?.imageData) {
     handleAIFrame(message)
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ ok: false, error: err.message, detections: [] }));
-    return true;
+      .then(result => { try { sendResponse(result); } catch (_) {} })
+      .catch(err => { try { sendResponse({ ok: false, error: err.message, detections: [] }); } catch (_) {} });
+    return true; // giữ message channel mở cho async response
   }
-  if (message?.type === 'AI_VIOLATION' && message?.detections) {
+
+  if (message?.type === 'AI_VIOLATION' && Array.isArray(message?.detections)) {
     handleAIViolation(message)
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ ok: false, error: err.message }));
+      .then(result => { try { sendResponse(result); } catch (_) {} })
+      .catch(err => { try { sendResponse({ ok: false, error: err.message }); } catch (_) {} });
     return true;
   }
+
   if (message?.type === 'AI_ENSURE_OFFSCREEN') {
     handleEnsureOffscreen()
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ ok: false, error: err.message }));
+      .then(result => { try { sendResponse(result); } catch (_) {} })
+      .catch(err => { try { sendResponse({ ok: false, error: err.message }); } catch (_) {} });
     return true;
   }
+
+  // AI_STATUS: forward tới offscreen document, KHÔNG gọi sendMessage lại về chính mình
+  // (vòng lặp vô tận cũ: background → runtime.sendMessage(AI_STATUS) → background → ...)
   if (message?.type === 'AI_STATUS') {
-    chrome.runtime.sendMessage({ type: 'AI_STATUS' }, (res) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ ok: false, status: 'unloaded', error: chrome.runtime.lastError.message });
-      } else {
-        sendResponse(res || { ok: false, status: 'unloaded' });
-      }
-    });
+    ensureOffscreenDocument()
+      .then(() => {
+        chrome.runtime.sendMessage(
+          // Gửi tới offscreen bằng cách không chỉ định extensionId
+          // (offscreen document cùng extension sẽ nhận được)
+          { type: 'AI_STATUS' },
+          (res) => {
+            const lastErr = chrome.runtime.lastError;
+            if (lastErr) {
+              // Offscreen chưa sẵn sàng hoặc model chưa load
+              try { sendResponse({ ok: false, status: 'unloaded', error: lastErr.message }); } catch (_) {}
+            } else {
+              try { sendResponse(res || { ok: false, status: 'unloaded' }); } catch (_) {}
+            }
+          }
+        );
+      })
+      .catch(err => {
+        try { sendResponse({ ok: false, status: 'unloaded', error: err.message }); } catch (_) {}
+      });
     return true;
   }
+
   return false;
 });
 
