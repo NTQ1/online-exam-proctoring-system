@@ -28,6 +28,8 @@ export const CURRENT_SERVER = SERVER_CONFIG[ENV];
 export const TIMEOUT_CONFIG = {
   AUTHENTICATION: 8000,
   SERVER_SYNC: 5000,
+  // finalizeSession triggers blockchain — give it more headroom
+  FINALIZE: 45000,
   TAB_RESPONSE: 3000,
 };
 

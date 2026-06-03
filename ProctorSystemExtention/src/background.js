@@ -97,15 +97,35 @@ async function handleStartProctoring(data) {
 
   if (runtimeState.status === 'active') {
     logger.warn('Existing active session will be superseded by new START_PROCTORING request');
-    void forceResetSession('superseded_by_new_session').catch((error) => {
+    // FIX: await forceResetSession để đảm bảo cleanup hoàn tất TRƯỚC khi start session mới.
+    // Không dùng void vì nếu cleanup chưa xong mà processStartProctoring chạy song song,
+    // runtimeState sẽ bị ghi đè, tạo ra session zombie.
+    await forceResetSession('superseded_by_new_session').catch((error) => {
       logger.warn('forceResetSession failed', error.message);
     });
+  }
+
+  // Guard: nếu một END_PROCTORING đang xử lý, từ chối start mới
+  if (runtimeState.status === 'ending') {
+    return {
+      ok: false,
+      status: 'error',
+      error: 'Phiên giám sát đang được kết thúc, vui lòng đợi',
+    };
   }
 
   runtimeState.status = 'authenticating';
 
   try {
     const authResponse = await authenticateRoomCode(roomCode, studentName, studentId);
+
+    // Guard: kiểm tra lại sau khi authenticate xong — có thể đã có END được gửi trong khi chờ
+    if (runtimeState.status === 'ending') {
+      logger.warn('handleStartProctoring: session ended during authentication, aborting start');
+      runtimeState.status = 'idle';
+      return { ok: false, status: 'error', error: 'Phiên đang kết thúc, không thể bắt đầu mới' };
+    }
+
     await processStartProctoring({ roomCode, studentName, studentId, authResponse });
 
     logger.info('handleStartProctoring completed successfully');
@@ -197,6 +217,13 @@ async function processStartProctoring({ roomCode, studentName, studentId, authRe
     logger.info('processStartProctoring: Injecting overlay into tab', tab.id);
     await injectOverlay(tab.id);
     logger.info('processStartProctoring: Overlay injected successfully');
+
+    // Guard: injectOverlay mất vài giây — nếu trong lúc đó END_PROCTORING đã chạy
+    // và reset runtimeState, không tiếp tục start heartbeat để tránh zombie session.
+    if (runtimeState.status !== 'active') {
+      logger.warn('processStartProctoring: status changed during inject (likely ended), aborting heartbeat setup');
+      return null;
+    }
 
     logger.info('processStartProctoring: Starting heartbeat monitoring');
     await initHeartbeatSession(session.sessionId, tab.id);
@@ -306,16 +333,39 @@ async function handleEndProctoring(data, sender) {
 
 async function processEndProctoring({ data, sender, session }) {
   const endedAt = Date.now();
+  const tabId = runtimeState.activeTabId ?? session.activeTabId ?? null;
   const windowId = session.activeWindowId || sender?.tab?.windowId || runtimeState.activeWindowId;
 
   logger.info('processEndProctoring: Starting cleanup');
 
-  // Chụp ảnh JPEG (nhẹ hơn PNG ~75%) — lỗi không block luồng kết thúc
+  // ── PHASE 1: Thoát fullscreen (chrome.windows API — chỉ background làm được) ──
+  // Overlay đã được content script tự xóa ngay khi user bấm nút — không cần chờ ở đây.
+  // exitTabFullscreen chạy ngay để window không còn bị kẹt fullscreen.
+  // removeOverlayDirectly vẫn chạy song song như safety net (end từ xa, timeout, v.v.)
+  await Promise.allSettled([
+    exitTabFullscreen(windowId).catch((err) => {
+      logger.warn('exitTabFullscreen failed (non-fatal)', err.message);
+    }),
+    typeof tabId === 'number'
+      ? removeOverlayDirectly(tabId).catch((err) => {
+          logger.warn('removeOverlayDirectly failed (non-fatal)', err.message);
+        })
+      : Promise.resolve(),
+  ]);
+  logger.info('processEndProctoring: Fullscreen exited and overlay removed');
+
+  // ── PHASE 2: Dừng monitoring — heartbeat, camera, content features ──
+  await cleanupMonitoring(tabId);
+  logger.info('processEndProctoring: Monitoring stopped');
+
+  // ── PHASE 3: Capture screenshot (sau khi thoát fullscreen để ảnh gọn hơn) ──
   const screenshotDataUrl = await captureFinalScreenshot(windowId).catch((error) => {
     logger.warn('captureFinalScreenshot failed', error.message);
     return null;
   });
 
+  // ── PHASE 4: Backend — upload ảnh rồi finalize (trigger blockchain) ──
+  // Thực hiện sau khi UX đã sạch — lỗi ở đây mới throw để caller biết.
   const screenshotUrl = await uploadFinalScreenshot(screenshotDataUrl, session).catch((error) => {
     logger.warn('uploadFinalScreenshot failed (non-fatal)', error.message);
     return null;
@@ -338,15 +388,8 @@ async function processEndProctoring({ data, sender, session }) {
   await apiService.finalizeSession(endPayload);
   logger.info('processEndProctoring: Backend finalize complete');
 
-  if (typeof runtimeState.activeTabId === 'number') {
-    await removeOverlayDirectly(runtimeState.activeTabId).catch((error) => {
-      logger.warn('Failed to remove overlay directly', error.message);
-    });
-  }
-
-  await exitTabFullscreen(windowId);
-
-  await cleanupRuntime();
+  // ── PHASE 5: Clear state + đóng offscreen ──
+  await cleanupState();
 
   logger.info('END_PROCTORING completed successfully');
 }
@@ -679,15 +722,9 @@ async function injectOverlay(tabId) {
   const extensionBaseUrl = chrome.runtime.getURL('');
   const session = runtimeState.session;
 
-  // Offscreen document đã được tạo trong processStartProctoring trước khi inject
-  // Chỉ cần kick off model load (non-blocking) — camera-monitor sẽ poll AI_STATUS
-  chrome.runtime.sendMessage({ type: 'AI_INIT_MODEL' }, (res) => {
-    if (chrome.runtime.lastError) {
-      logger.warn('[AI-BG] AI_INIT_MODEL kick error:', chrome.runtime.lastError.message);
-    } else {
-      logger.info('[AI-BG] Model init kicked:', res?.status);
-    }
-  });
+  // Offscreen document đã tự gọi loadModel() khi load (xem offscreen.js cuối file).
+  // Không cần kick AI_INIT_MODEL từ đây — sẽ gây "Receiving end does not exist"
+  // vì offscreen script chưa finish loading khi ensureOffscreenDocument() return.
 
   // Inject CSS bypassing CSP
   await chrome.scripting.insertCSS({
@@ -873,75 +910,68 @@ async function cleanupRuntime() {
     sessionId: runtimeState.session?.sessionId,
     activeTabId: runtimeState.activeTabId,
     activeWindowId: runtimeState.activeWindowId,
-    stack: new Error().stack.split('\n').slice(1, 4).join(' | '),
   });
-
-  // Đánh dấu 'ending' ngay để các guard khác (handleAIFrame, processFrame) thoát sớm
   runtimeState.status = 'ending';
+  await cleanupMonitoring(runtimeState.activeTabId);
+  await cleanupState();
+}
 
+/**
+ * PHASE 2 — Dừng tất cả monitoring đang chạy:
+ * heartbeat, camera-monitor, content script features.
+ * Không đụng runtimeState để tránh race với processStartProctoring.
+ */
+async function cleanupMonitoring(tabId) {
+  // Dừng heartbeat alarm ngay
   logger.info('cleanupRuntime: Stopping heartbeat monitoring');
   await stopHeartbeatMonitoring();
   await clearAllHeartbeatData();
 
-  // Remove injected CSS from the proctored tab
+  if (typeof tabId !== 'number') return;
+
+  // Dừng camera-monitor trực tiếp qua executeScript (không phụ thuộc messaging)
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => { try { window.__cameraMonitor?.stop?.(); } catch (_) { } },
+  }).catch((err) => {
+    logger.warn('cleanupMonitoring: stop cameraMonitor failed (non-fatal)', err.message);
+  });
+
+  // Gửi SESSION_CLEANUP để content script dọn features (belt + suspenders)
+  await sendToTab(tabId, 'SESSION_CLEANUP', { reason: 'backend_ended_or_timeout' }).catch((err) => {
+    logger.warn('cleanupMonitoring: SESSION_CLEANUP send failed (non-fatal)', err.message);
+  });
+}
+
+/**
+ * PHASE 5 — Clear toàn bộ state + đóng offscreen document.
+ * Chạy sau khi backend đã xác nhận để handleAIFrame guard hoạt động đúng.
+ */
+async function cleanupState() {
+  // Xóa CSS overlay còn sót (removeOverlayDirectly có thể đã làm, belt + suspenders)
   if (typeof runtimeState.activeTabId === 'number') {
     await chrome.scripting.removeCSS({
       target: { tabId: runtimeState.activeTabId },
       files: ['src/overlay.css'],
-    }).catch((err) => {
-      logger.warn('cleanupRuntime: removeCSS failed', err.message);
-    });
-  }
-
-  // FIX #2: Gửi SESSION_CLEANUP đến content script để dừng camera-monitor TRƯỚC khi đóng offscreen
-  // Điều này đảm bảo camera-monitor ngừng gửi AI_FRAME trước khi offscreen document bị đóng,
-  // tránh lỗi "Receiving end does not exist" spam trong console.
-  if (typeof runtimeState.activeTabId === 'number') {
-    const tabId = runtimeState.activeTabId;
-    try {
-      // Dùng executeScript để stop camera-monitor trực tiếp — không phụ thuộc messaging
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          try { window.__cameraMonitor?.stop?.(); } catch (_) { }
-        },
-      });
-      logger.debug('Camera monitor stopped via executeScript before offscreen close');
-    } catch (error) {
-      logger.warn('Could not stop camera monitor via executeScript:', error.message);
-    }
-
-    // Sau đó mới gửi SESSION_CLEANUP (belt + suspenders)
-    try {
-      await sendToTab(tabId, 'SESSION_CLEANUP', { reason: 'backend_ended_or_timeout' });
-      logger.debug('Sent SESSION_CLEANUP signal to content script');
-    } catch (error) {
-      logger.warn('Failed to send cleanup signal to content (non-fatal):', error.message);
-    }
+    }).catch(() => { });
   }
 
   // Clear runtime state TRƯỚC khi đóng offscreen để handleAIFrame guard hoạt động
   runtimeState.session = null;
   runtimeState.activeTabId = null;
   runtimeState.activeWindowId = null;
-  await clearAuthSession().catch((error) => {
-    logger.warn('cleanupRuntime clearAuthSession failed', error.message);
+  await clearAuthSession().catch((err) => {
+    logger.warn('cleanupState: clearAuthSession failed', err.message);
   });
 
-  // FIX #2 (tiếp): Đợi ngắn để camera-monitor kịp nhận tín hiệu dừng và
-  // các frame in-flight hoàn tất trước khi đóng offscreen document.
-  // 500ms đủ cho 1 vòng lặp interval (CAMERA_INTERVAL_MS=1000ms) để timeout
-  // — ngắn hơn trước (2500ms) vì camera-monitor đã bị dừng chủ động ở trên.
-  await new Promise(resolve => setTimeout(resolve, 500));
+  // Đợi ngắn để các AI_FRAME in-flight kịp settle trước khi đóng offscreen
+  await new Promise(resolve => setTimeout(resolve, 300));
 
-  // Đóng Offscreen Document sau khi camera-monitor đã dừng hẳn
-  await closeOffscreenDocument().catch(err => {
-    logger.debug('cleanupRuntime closeOffscreen (non-fatal):', err.message);
+  await closeOffscreenDocument().catch((err) => {
+    logger.debug('cleanupState: closeOffscreen (non-fatal)', err.message);
   });
 
-  // FIX #3: Reset về idle để popup có thể mở lại ngay lập tức
   runtimeState.status = 'idle';
-
   logger.info('cleanupRuntime complete — status reset to idle');
 }
 
@@ -1012,13 +1042,9 @@ async function closeOffscreenDocument() {
 async function handleEnsureOffscreen() {
   try {
     await ensureOffscreenDocument();
-    chrome.runtime.sendMessage({ type: 'AI_INIT_MODEL' }, (res) => {
-      if (chrome.runtime.lastError) {
-        logger.warn('[AI-BG] AI_INIT_MODEL error:', chrome.runtime.lastError.message);
-      } else {
-        logger.info('[AI-BG] Model init response:', res?.status);
-      }
-    });
+    // Offscreen tự gọi loadModel() khi document load — không cần kick AI_INIT_MODEL.
+    // Gọi sendMessage ngay sau ensureOffscreenDocument() gây "Receiving end does not exist"
+    // vì offscreen script chưa finish loading khi createDocument() promise resolve.
     return { ok: true };
   } catch (err) {
     logger.error('[AI-BG] handleEnsureOffscreen failed:', err.message);

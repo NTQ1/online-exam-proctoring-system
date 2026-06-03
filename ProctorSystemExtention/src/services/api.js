@@ -77,7 +77,10 @@ class APIService {
     // Add timeout
     const timeoutMs = options.timeout || TIMEOUT_CONFIG.SERVER_SYNC;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = setTimeout(
+      () => controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError')),
+      timeoutMs
+    );
 
     try {
       logger.debug('API Request', { url, method: options.method || 'GET' });
@@ -219,7 +222,7 @@ class APIService {
         triggerBlockchain: true,
         timestamp: Date.now(),
       }),
-      timeout: TIMEOUT_CONFIG.SERVER_SYNC,
+      timeout: TIMEOUT_CONFIG.FINALIZE, // blockchain op — needs more time than SERVER_SYNC
     });
   }
 

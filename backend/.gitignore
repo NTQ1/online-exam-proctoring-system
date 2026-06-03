@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+
+# Uploaded images — keep folder structure but ignore actual files
+public/ai-violations/*
+public/screenshots/*
+
+# Keep the folders tracked (so they exist on fresh clone)
+!public/ai-violations/.gitkeep
+!public/screenshots/.gitkeep

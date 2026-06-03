@@ -296,6 +296,13 @@ function attachMessageListener() {
     // Handle SESSION_CLEANUP: Background signals content to clean up its state
     if (type === 'SESSION_CLEANUP') {
       logger.info('Content received SESSION_CLEANUP signal, disposing state');
+      // Nếu đang trong quá trình handleEndClick (isCleaningUp = true), bỏ qua —
+      // handleEndClick sẽ tự dispose sau khi END_PROCTORING response về.
+      if (isCleaningUp) {
+        logger.debug('SESSION_CLEANUP ignored — handleEndClick in progress');
+        sendResponse({ ok: true });
+        return true;
+      }
       removeOverlay();
       sendResponse({ ok: true });
       return true;
@@ -357,45 +364,25 @@ async function handleEndClick() {
   isCleaningUp = true;
   setField('status', 'Đang kết thúc phiên...');
 
+  // ── PHASE 1: Xóa overlay DOM ngay để user thấy trang bình thường ──
+  // Chỉ xóa DOM, KHÔNG dispose content script (listener vẫn sống để nhận response).
+  removeOverlayDOM();
+
+  // ── PHASE 2: Gửi END_PROCTORING sang background, đợi confirm rồi mới dispose ──
+  // Giữ listener sống trong lúc chờ để Chrome có thể route response về.
+  // Background làm fullscreen exit + blockchain — content không block vào đó.
   try {
-    logger.info('Content sending END_PROCTORING');
-    const response = await sendToBackground('END_PROCTORING', {
-      reason: 'user_clicked_end',
-    }, 20000);
-
+    const response = await sendToBackground('END_PROCTORING', { reason: 'user_clicked_end' }, 35000);
     if (response?.ok !== true) {
-      throw new Error(response?.error || 'Không thể kết thúc phiên');
+      logger.warn('END_PROCTORING response not ok', response?.error);
+    } else {
+      logger.info('Background confirmed END_PROCTORING completed');
     }
-
-    logger.info('Background confirmed END_PROCTORING, removing overlay');
-    removeOverlay();
   } catch (error) {
-    logger.error('handleEndClick failed', error.message);
-
-    // If port closed, retry once with fresh connection
-    if (isPortClosureError(error)) {
-      logger.info('Port closed, attempting retry');
-      try {
-        const retryResponse = await sendToBackground('END_PROCTORING', {
-          reason: 'user_clicked_end_retry',
-        }, 20000);
-
-        if (retryResponse?.ok === true) {
-          logger.info('Retry succeeded, removing overlay');
-          removeOverlay();
-          return;
-        }
-      } catch (retryError) {
-        logger.error('Retry failed', retryError.message);
-        error = retryError;
-      }
-    }
-
-    // If we get here, END_PROCTORING failed
-    isCleaningUp = false;
-    button.disabled = false;
-    showError(error.message);
-    setField('status', 'Kết thúc phiên thất bại');
+    logger.error('handleEndClick END_PROCTORING failed', error.message);
+  } finally {
+    // ── PHASE 3: Dispose sau khi message roundtrip xong (hoặc timeout/fail) ──
+    disposeContentScript();
   }
 }
 
@@ -466,24 +453,27 @@ function stopTimer() {
   }
 }
 
-function removeOverlay() {
-  if (rootEl === null) {
-    logger.debug('Overlay already removed');
-    disposeContentScript();
-    return;
-  }
-
-  logger.info('Removing overlay UI');
+/**
+ * Chỉ xóa DOM overlay — KHÔNG dispose listener hay state.
+ * Dùng khi cần UI biến mất ngay nhưng message channel vẫn cần sống
+ * (ví dụ: đang chờ response END_PROCTORING từ background).
+ */
+function removeOverlayDOM() {
   stopTimer();
-
   if (rootEl) {
-    try {
-      rootEl.remove();
-    } catch (error) {
-      logger.warn('Failed to remove rootEl', error.message);
-    }
+    try { rootEl.remove(); } catch (_) {}
     rootEl = null;
     panelEl = null;
+  }
+  logger.info('Overlay DOM removed (listener still active)');
+}
+
+function removeOverlay() {
+  if (rootEl !== null) {
+    logger.info('Removing overlay UI');
+    removeOverlayDOM();
+  } else {
+    logger.debug('Overlay DOM already gone, proceeding to dispose');
   }
 
   // Signal background to cleanup injected CSS and features
