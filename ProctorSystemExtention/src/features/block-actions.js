@@ -60,12 +60,18 @@ function saveStats() {
 const DANGEROUS_KEYS = [
   { ctrlKey: true, code: 'KeyP', name: 'Ctrl+P (In trang)' },
   { ctrlKey: true, code: 'KeyU', name: 'Ctrl+U (View Source)' },
+  { ctrlKey: true, code: 'KeyS', name: 'Ctrl+S (Lưu trang)' },
   { code: 'F12', name: 'F12 (DevTools)' },
   { ctrlKey: true, shiftKey: true, code: 'KeyI', name: 'Ctrl+Shift+I (DevTools)' },
   { ctrlKey: true, shiftKey: true, code: 'KeyC', name: 'Ctrl+Shift+C (Inspector)' },
   { ctrlKey: true, shiftKey: true, code: 'KeyJ', name: 'Ctrl+Shift+J (Console)' },
   { ctrlKey: true, shiftKey: true, code: 'KeyK', name: 'Ctrl+Shift+K (DevTools)' },
   { code: 'Escape', name: 'Escape (thoát toàn màn hình)' },
+  // Chặn nút chụp màn hình
+  { code: 'PrintScreen', name: 'PrintScreen (Chụp màn hình)' },
+  { ctrlKey: true, code: 'PrintScreen', name: 'Ctrl+PrintScreen (Chụp màn hình)' },
+  { altKey: true, code: 'PrintScreen', name: 'Alt+PrintScreen (Chụp cửa sổ)' },
+  { metaKey: true, shiftKey: true, code: 'KeyS', name: 'Win+Shift+S (Snipping Tool)' },
 ];
 
 /**
@@ -166,9 +172,10 @@ function handleKeyDown(e) {
     const ctrlMatch  = dangerousKey.ctrlKey  ? e.ctrlKey  : true;
     const shiftMatch = dangerousKey.shiftKey ? e.shiftKey : true;
     const altMatch   = dangerousKey.altKey   ? e.altKey   : true;
+    const metaMatch  = dangerousKey.metaKey  ? e.metaKey  : true;
     const codeMatch  = e.code === dangerousKey.code;
 
-    if (codeMatch && ctrlMatch && shiftMatch && altMatch) {
+    if (codeMatch && ctrlMatch && shiftMatch && altMatch && metaMatch) {
       e.preventDefault();
       e.stopPropagation();
       logViolation('DANGEROUS_SHORTCUT', { shortcut: dangerousKey.name });

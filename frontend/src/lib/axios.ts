@@ -3,7 +3,7 @@ import axios from 'axios';
 import { use } from 'react';
 
 const api = axios.create({
-    baseURL: 'http://localhost:5001/api' , // Thay đổi URL cơ sở nếu cần
+    baseURL: `${import.meta.env.VITE_API_URL ?? 'http://localhost:5001'}/api`,
     withCredentials: true, // Cho phép gửi cookie nếu cần
 });
 

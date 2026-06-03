@@ -23,7 +23,7 @@ export async function connectDB() {
     await sequelize.authenticate()
     console.log('Kết nối database thành công')
 
-    await sequelize.sync({ force: false, alter: true }) // use alter to apply changes safely
+    await sequelize.sync({ force: false }) // ← bỏ alter: true
     console.log('Đồng bộ bảng thành công')
 
   } catch (error) {

@@ -19,7 +19,7 @@ import {
   History,
   Settings,
   LogOut,
-  ShieldCheck,
+  
 } from "lucide-react"
 
 const menuItems = [
@@ -27,7 +27,7 @@ const menuItems = [
   { title: "Phòng thi", icon: BookOpen, path: "/rooms" },
   { title: "Blockchain", icon: FileBarChart, path: "/blockchain" },
   { title: "Lịch sử thi", icon: History, path: "/history" },
-  { title: "Cài đặt", icon: Settings, path: "/settings" },
+  { title: "Giới thiệu", icon: Settings, path: "/settings" },
 ]
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {

@@ -1,3 +1,5 @@
+
+// Middleware để kiểm tra quyền truy cập dựa trên vai trò
 export const authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user?.role)) {

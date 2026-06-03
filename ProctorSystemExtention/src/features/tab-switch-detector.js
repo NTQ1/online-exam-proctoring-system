@@ -75,7 +75,8 @@ function sendViolation(type, data) {
   try {
     sendFn({
       type: 'LOG_VIOLATION',
-      data: { type, severity: 'warning', feature: 'tab-switch', timestamp: Date.now(), details: data },
+      // TAB_AWAY là vi phạm nghiêm trọng cần đẩy lên blockchain
+      data: { type, severity: type === 'TAB_AWAY' ? 'high' : 'warning', feature: 'tab-switch', timestamp: Date.now(), details: data },
     }, () => { if (chrome.runtime?.lastError) logger.debug('Failed to send violation', chrome.runtime.lastError.message); });
   } catch (error) {
     logger.debug('Error sending violation', error.message);

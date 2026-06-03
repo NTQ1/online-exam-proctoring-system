@@ -2,19 +2,24 @@
  * Configuration for Proctor System Extension
  */
 
+// ─────────────────────────────────────────────────────────
+// ⚙️  ĐỔI ĐỊA CHỈ SERVER Ở ĐÂY — chỉ cần sửa 1 dòng duy nhất
+//    VPS:       'https://your-domain.com'  hoặc  'http://103.x.x.x:5001'
+//    Dev local: 'http://localhost:5001'
+// ─────────────────────────────────────────────────────────
+const SERVER_HOST = 'http://localhost:5001'
+
 // Server configuration
 export const SERVER_CONFIG = {
-  // Development
- development: {
-  baseUrl: 'http://localhost:5001',
-  apiUrl: 'http://localhost:5001/api',
-  wsUrl: 'ws://localhost:5001',
-},
-  // Production
+  development: {
+    baseUrl: SERVER_HOST,
+    apiUrl: `${SERVER_HOST}/api`,
+    wsUrl: SERVER_HOST.replace(/^https/, 'wss').replace(/^http/, 'ws'),
+  },
   production: {
-    baseUrl: 'https://api.proctor-system.com',
-    apiUrl: 'https://api.proctor-system.com/api',
-    wsUrl: 'wss://api.proctor-system.com',
+    baseUrl: SERVER_HOST,
+    apiUrl: `${SERVER_HOST}/api`,
+    wsUrl: SERVER_HOST.replace(/^https/, 'wss').replace(/^http/, 'ws'),
   },
 };
 

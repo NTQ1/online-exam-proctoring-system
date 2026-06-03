@@ -2,6 +2,7 @@ import ViolationEvent from '../models/ViolationEvent.js'
 import ExamParticipant from '../models/ExamParticipant.js'
 import ExamRoom from '../models/ExamRoom.js'
 
+// Lấy danh sách vi phạm gần đây nhất
 export const getRecentViolations = async (req, res) => {
   try {
     const violations = await ViolationEvent.findAll({
@@ -26,6 +27,7 @@ export const getRecentViolations = async (req, res) => {
   }
 }
 
+// Lấy thống kê vi phạm theo phòng thi
 export const getViolationStatistics = async (req, res) => {
   try {
     const violations = await ViolationEvent.findAll({

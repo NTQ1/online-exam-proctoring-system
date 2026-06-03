@@ -10,7 +10,6 @@ interface ExamRoom {
   code: string
   subject_name: string
   status: "pending" | "active" | "ended"
-  monitor_level: "LOW" | "MEDIUM" | "HIGH"
   createdAt: string
 }
 
@@ -75,10 +74,6 @@ const ExamRoomTable = () => {
                   </th>
 
                   <th className="text-left py-3 px-4 font-medium">
-                    Mức giám sát
-                  </th>
-
-                  <th className="text-left py-3 px-4 font-medium">
                     Trạng thái
                   </th>
 
@@ -90,7 +85,7 @@ const ExamRoomTable = () => {
                 {rooms.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={4}
                       className="text-center py-6 text-muted-foreground"
                     >
                       Chưa có phòng thi nào
@@ -108,10 +103,6 @@ const ExamRoomTable = () => {
 
                       <td className="py-3 px-4">
                         {room.subject_name}
-                      </td>
-
-                      <td className="py-3 px-4">
-                        {room.monitor_level}
                       </td>
 
                       <td className="py-3 px-4">

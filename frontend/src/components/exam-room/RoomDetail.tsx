@@ -9,7 +9,7 @@ import api from "@/lib/axios"
 import { toast } from "sonner"
 import SessionDetailDialog from "./SessionDetailDialog"
 
-const API_BASE = "http://localhost:5001"
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:5001'
 
 interface ExamRoom {
   id: number

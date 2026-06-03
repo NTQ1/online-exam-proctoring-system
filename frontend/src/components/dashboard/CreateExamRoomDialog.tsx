@@ -6,13 +6,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import api from "@/lib/axios"
 import { toast } from "sonner"
 import { XIcon } from "lucide-react"
@@ -25,7 +18,6 @@ interface Props {
 
 const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
   const [subjectName, setSubjectName] = useState("")
-  const [monitorLevel, setMonitorLevel] = useState("MEDIUM")
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = async () => {
@@ -38,11 +30,9 @@ const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
       setLoading(true)
       await api.post('/exam-rooms', {
         subject_name: subjectName,
-        monitor_level: monitorLevel,
       })
       toast.success("Tạo phòng thi thành công!")
       setSubjectName("")
-      setMonitorLevel("MEDIUM")
       onCreated()
       onClose()
     } catch (error) {
@@ -73,20 +63,6 @@ const CreateExamRoomDialog = ({ open, onClose, onCreated }: Props) => {
               value={subjectName}
               onChange={(e) => setSubjectName(e.target.value)}
             />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label>Mức độ giám sát</Label>
-            <Select value={monitorLevel} onValueChange={setMonitorLevel}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="LOW">Thấp</SelectItem>
-                <SelectItem value="MEDIUM">Trung bình</SelectItem>
-                <SelectItem value="HIGH">Cao</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import ExamRoom from '../models/ExamRoom.js'
 import ExamParticipant from '../models/ExamParticipant.js'
 
+// Controller để lấy danh sách phòng thi và thống kê cho dashboard
 export const getStats = async (req, res) => {
   try {
     const teacher_id = req.user.userId
@@ -30,6 +31,7 @@ export const getStats = async (req, res) => {
   }
 }
 
+// Lấy danh sách phòng thi của giáo viên
 export const getExamRooms = async (req, res) => {
   try {
     const teacher_id = req.user.userId

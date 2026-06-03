@@ -13,7 +13,6 @@ const ExamRoom = sequelize.define('ExamRoom', {
     allowNull: false,
     unique: true,
   },
-  
   subject_name: {
     type: DataTypes.STRING(100),
     allowNull: false,
@@ -28,11 +27,6 @@ const ExamRoom = sequelize.define('ExamRoom', {
       model: User,
       key: 'id',
     },
-  },
-  monitor_level: {
-    type: DataTypes.ENUM('LOW', 'MEDIUM', 'HIGH'),
-    allowNull: false,
-    defaultValue: 'MEDIUM',
   },
   status: {
     type: DataTypes.ENUM('pending', 'active', 'ended'),

@@ -12,6 +12,8 @@ import proctorRouter from './routes/proctorRoute.js'
 import monitoringSessionRoutes from './routes/monitoringSessionRoutes.js'
 import violationRouter from './routes/violationRoute.js'   // thêm dòng này
 import examHistoryRouter from './routes/examHistoryRoutes.js'
+import blockchainRouter from './routes/blockchainRoutes.js'
+
 
 
 import path from 'path'
@@ -38,14 +40,28 @@ app.use(cors({
     // Cho phép requests không có origin (server-to-server, Postman, curl)
     if (!origin) return callback(null, true)
 
+    // Cho phép tất cả chrome-extension:// origins
+    if (origin.startsWith('chrome-extension://')) {
+      return callback(null, true)
+    }
+
+    // Nếu CORS_ALLOW_ALL=true thì mở toàn bộ (dùng khi dev trên LAN)
+    if (process.env.CORS_ALLOW_ALL === 'true') {
+      return callback(null, true)
+    }
+
     const allowedOrigins = [
       process.env.CLIENT_URL,
-      'http://localhost:5173',  // Vite dev server
-      'http://localhost:3000',  // fallback dev
+      'http://localhost:5173',
+      'http://localhost:3000',
     ].filter(Boolean)
 
-    // Cho phép tất cả chrome-extension:// origins (browser extension cùng thiết bị)
-    if (origin.startsWith('chrome-extension://') || allowedOrigins.includes(origin)) {
+    // Cho phép thêm danh sách origins từ env (phân cách bởi dấu phẩy)
+    if (process.env.EXTRA_ORIGINS) {
+      process.env.EXTRA_ORIGINS.split(',').forEach(o => allowedOrigins.push(o.trim()))
+    }
+
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true)
     }
 
@@ -61,6 +77,9 @@ app.use('/api/sessions', monitoringSessionRoutes)
 app.use('/api/exam-participants', examParticipantRouter)
 app.use('/api/violations', violationRouter)   // thêm dòng này
 app.use('/api/exam-history', examHistoryRouter)
+app.use('/api/blockchain', blockchainRouter)
+
+
 
 
 // private routes
@@ -72,8 +91,13 @@ app.use('/api/exam-rooms', examRoomRouter)
 async function start() {
   await connectDB()
 
-  app.listen(PORT, () => {
-    console.log(`Server đang chạy trên cổng ${PORT}`)
+  // Lắng nghe trên 0.0.0.0 để các thiết bị trong mạng LAN có thể kết nối
+  const HOST = process.env.HOST || '0.0.0.0'
+  app.listen(PORT, HOST, () => {
+    console.log(`Server đang chạy tại http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`)
+    if (HOST === '0.0.0.0') {
+      console.log(`Truy cập từ thiết bị khác trong mạng LAN: http://<IP_CỦA_MÁY_NÀY>:${PORT}`)
+    }
   })
 }
 

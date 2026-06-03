@@ -7,7 +7,7 @@ import { Op } from 'sequelize'
 function jsonResponse(res, statusCode, payload) {
   return res.status(statusCode).json(payload)
 }
-
+// Lấy lịch sử thi với phân trang, tìm kiếm và lọc
 export const getExamHistory = async (req, res) => {
   try {
     const { 
@@ -95,7 +95,7 @@ export const getExamHistory = async (req, res) => {
     return jsonResponse(res, 500, { ok: false, message: error.message })
   }
 }
-
+// Lấy lịch sử thi của 1 sinh viên theo studentId
 export const getStudentHistory = async (req, res) => {
   try {
     const { studentId } = req.params

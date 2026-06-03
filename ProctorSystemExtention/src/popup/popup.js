@@ -27,7 +27,6 @@ function initDOMElements() {
   statusText = document.getElementById('statusText');
   btnText = document.querySelector('.btn-text');
   btnLoading = document.querySelector('.btn-loading');
-
 }
 
 document.addEventListener('DOMContentLoaded', initPopup);
@@ -47,7 +46,6 @@ async function initPopup() {
   if (roomCodeInput) roomCodeInput.addEventListener('input', clearError);
   if (studentNameInput) studentNameInput.addEventListener('input', clearError);
   if (studentIdInput) studentIdInput.addEventListener('input', clearError);
-
 }
 
 async function handleFormSubmit(e) {

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 
+//kiểm tra token hợp lệ
 export const authenticate = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;

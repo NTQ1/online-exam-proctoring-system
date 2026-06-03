@@ -12,7 +12,6 @@ interface ExamRoom {
   code: string
   subject_name: string
   status: 'pending' | 'active' | 'ended'
-  monitor_level: 'LOW' | 'MEDIUM' | 'HIGH'
   createdAt: string
 }
 
@@ -20,12 +19,6 @@ const statusMap = {
   pending: { label: 'Chờ bắt đầu', color: 'bg-yellow-100 text-yellow-700' },
   active: { label: 'Đang diễn ra', color: 'bg-green-100 text-green-700' },
   ended: { label: 'Đã kết thúc', color: 'bg-gray-100 text-gray-700' },
-}
-
-const monitorMap = {
-  LOW: { label: 'Thấp', color: 'text-green-600' },
-  MEDIUM: { label: 'Trung bình', color: 'text-yellow-600' },
-  HIGH: { label: 'Cao', color: 'text-red-600' },
 }
 
 const RoomsPage = () => {
@@ -111,14 +104,7 @@ const RoomsPage = () => {
                   </div>
                   <CardTitle className="text-base">{room.subject_name}</CardTitle>
                 </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Mức giám sát</span>
-                    <span className={`font-semibold ${monitorMap[room.monitor_level].color}`}>
-                      {monitorMap[room.monitor_level].label}
-                    </span>
-                  </div>
-
+                <CardContent>
                   <div className="flex gap-2 pt-1">
                     {room.status === 'pending' && (
                       <>
@@ -133,21 +119,21 @@ const RoomsPage = () => {
                     )}
                     {room.status === 'active' && (
                       <>
-                      <Button size="sm" variant="destructive" className="flex-1 gap-1" onClick={(e) => handleEnd(e, room.id)}>
-                        <Square className="size-3" />
-                        Kết thúc
-                      </Button>
-                      <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={(e) => handleDelete(e, room.id)}>
+                        <Button size="sm" variant="destructive" className="flex-1 gap-1" onClick={(e) => handleEnd(e, room.id)}>
+                          <Square className="size-3" />
+                          Kết thúc
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={(e) => handleDelete(e, room.id)}>
                           <Trash2 className="size-3" />
                         </Button>
                       </>
                     )}
                     {room.status === 'ended' && (
                       <>
-                      <Button size="sm" variant="outline" className="flex-1" disabled>
-                        Đã kết thúc
-                      </Button>
-                      <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={(e) => handleDelete(e, room.id)}>
+                        <Button size="sm" variant="outline" className="flex-1" disabled>
+                          Đã kết thúc
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={(e) => handleDelete(e, room.id)}>
                           <Trash2 className="size-3" />
                         </Button>
                       </>

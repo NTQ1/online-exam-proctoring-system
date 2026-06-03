@@ -136,11 +136,6 @@ export const handleAuthRoomCode = async (req, res) => {
       return jsonResponse(res, 404, { ok: false, message: 'Phòng thi không tồn tại' })
     }
 
-    // Không cho phép tham gia phòng thi đã kết thúc
-    if (room.status === 'ended') {
-      return jsonResponse(res, 403, { ok: false, message: 'Phòng thi đã kết thúc, không thể tham gia' })
-    }
-
     // Find or create participant
     let participant = await ExamParticipant.findOne({
       where: { room_id: room.id, student_id_string: studentId }
@@ -185,7 +180,7 @@ export const handleAuthRoomCode = async (req, res) => {
 
 export const handleStartSession = async (req, res) => {
   try {
-    const { sessionId, timestamp, roomCode, studentName, studentId, tabs, client } = req.body
+    const { sessionId, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
     const id = normalizeSessionId(sessionId)
@@ -196,14 +191,6 @@ export const handleStartSession = async (req, res) => {
     session.start_time = timestamp ? new Date(timestamp) : new Date()
     await session.save()
 
-    // Cập nhật trạng thái participant sang 'online' khi session start
-    if (session.participant_id) {
-      await ExamParticipant.update(
-        { status: 'online' },
-        { where: { id: session.participant_id } }
-      ).catch(() => {}) // non-fatal
-    }
-
     return jsonResponse(res, 200, { ok: true, sessionId, message: 'Session started' })
   } catch (error) {
     return jsonResponse(res, 500, { ok: false, message: error.message })
@@ -212,28 +199,16 @@ export const handleStartSession = async (req, res) => {
 
 export const handleEndSession = async (req, res) => {
   try {
-    const { sessionId, timestamp, endedAt, status, reason } = req.body
+    const { sessionId, timestamp } = req.body
     if (!sessionId) return jsonResponse(res, 400, { ok: false, message: 'sessionId required' })
 
     const id = normalizeSessionId(sessionId)
     const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
-    // Chỉ cập nhật nếu chưa ở trạng thái cuối (tránh overwrite 'finalized')
-    if (session.status !== 'finalized') {
-      session.status = 'ended'
-      session.end_time = endedAt ? new Date(endedAt) : (timestamp ? new Date(timestamp) : new Date())
-      if (reason) session.end_reason = reason
-      await session.save()
-    }
-
-    // Cập nhật trạng thái participant sang 'offline' khi session kết thúc
-    if (session.participant_id) {
-      await ExamParticipant.update(
-        { status: 'offline' },
-        { where: { id: session.participant_id } }
-      ).catch(() => {}) // non-fatal
-    }
+    session.status = 'ended'
+    session.end_time = timestamp ? new Date(timestamp) : new Date()
+    await session.save()
 
     return jsonResponse(res, 200, { ok: true, sessionId, message: 'Session ended' })
   } catch (error) {
@@ -250,8 +225,6 @@ export const handleFinalizeSession = async (req, res) => {
     const session = await MonitoringSession.findByPk(id)
     if (!session) return jsonResponse(res, 404, { ok: false, message: 'Session not found' })
 
-    // screenshotUrl: URL đã upload trước (extension gửi URL sau khi uploadScreenshot)
-    // screenshotDataUrl: base64 fallback (nếu extension gửi thẳng base64)
     let finalScreenshotUrl = screenshotUrl || null
     if (!finalScreenshotUrl && screenshotDataUrl) {
       finalScreenshotUrl = saveBase64Image(screenshotDataUrl, 'screenshots')
@@ -264,50 +237,52 @@ export const handleFinalizeSession = async (req, res) => {
     session.trigger_blockchain = triggerBlockchain || false
     await session.save()
 
-    // Cập nhật participant sang 'offline' khi phiên được finalize
-    if (session.participant_id) {
-      await ExamParticipant.update(
-        { status: 'offline' },
-        { where: { id: session.participant_id } }
-      ).catch(() => {}) // non-fatal
-    }
-
-    // ── Blockchain logic ──
-    const highViolations = await ViolationEvent.findAll({
-      where: {
-        session_id: id,
-        [Op.or]: [
-          { severity: 'high' },
-          { type: 'ai_violation' },
-        ],
-      },
+    // ── Verdict logic ──
+    const allViolations = await ViolationEvent.findAll({
+      where: { session_id: id },
       order: [['timestamp', 'ASC']],
     })
 
-    if (highViolations.length === 0) {
+    if (allViolations.length === 0) {
       session.verdict = 'clean'
-      await session.save()
+    } else {
+      session.verdict = 'violated'
+    }
+    await session.save()
+
+    // ── Blockchain logic ──
+    const highViolations = allViolations.filter(
+      v => v.severity === 'high' || v.type === 'ai_violation'
+    )
+
+    // ── Clean session: vẫn đẩy lên chain để đối chiếu sau này ──
+    if (allViolations.length === 0) {
+      let cleanBlockchainResult = null
+      if (triggerBlockchain) {
+        try {
+          // Tạo một "violation" giả mang thông tin thời điểm kết thúc
+          const cleanRecord = [{
+            type: 'CLEAN_SESSION',
+            severity: 'info',
+            timestamp: new Date(),
+            details: { message: 'No violations detected — session ended cleanly' },
+          }]
+          cleanBlockchainResult = await pushToBlockchain(id, cleanRecord)
+        } catch (err) {
+          console.error('[Finalize] Blockchain push (clean) error:', err.message)
+          cleanBlockchainResult = { status: 'failed', error: err.message }
+        }
+      }
       return jsonResponse(res, 200, {
         ok: true, sessionId,
         message: 'Session finalized',
         verdict: 'clean',
-        blockchain: null,
+        blockchain: cleanBlockchainResult,
       })
     }
 
-    session.verdict = 'violated'
-    await session.save()
-
-    // Cập nhật participant sang 'suspicious' nếu có vi phạm
-    if (session.participant_id) {
-      await ExamParticipant.update(
-        { status: 'suspicious' },
-        { where: { id: session.participant_id } }
-      ).catch(() => {})
-    }
-
     let blockchainResult = null
-    if (triggerBlockchain) {
+    if (triggerBlockchain && highViolations.length > 0) {
       try {
         blockchainResult = await pushToBlockchain(id, highViolations)
       } catch (err) {
@@ -320,7 +295,7 @@ export const handleFinalizeSession = async (req, res) => {
       ok: true, sessionId,
       message: 'Session finalized',
       verdict: 'violated',
-      violations_count: highViolations.length,
+      violations_count: allViolations.length,
       blockchain: blockchainResult,
     })
   } catch (error) {

@@ -9,6 +9,9 @@ import ExamRoom from './pages/ExamRoomPage'
 import RoomDetailPage from './pages/RoomDetailPage'
 import StudentPage from './pages/StudentPage'
 import ExamHistoryPage from './pages/ExamHistoryPage'
+import SettingsPages from './pages/SettingsPages'
+import BlockChainPages from './pages/BlockChainPages'
+
 
 function App() {
   return (  
@@ -27,6 +30,8 @@ function App() {
               <Route path="/rooms" element={<ExamRoom />} />
               <Route path="/rooms/:id" element={<RoomDetailPage />} />
               <Route path="/history" element={<ExamHistoryPage />} />
+              <Route path="/settings" element={<SettingsPages />} />
+              <Route path="/blockchain" element={<BlockChainPages />} />
             </Route>
            
 

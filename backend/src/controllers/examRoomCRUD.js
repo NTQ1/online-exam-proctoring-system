@@ -12,19 +12,10 @@ const generateRoomCode = () => {
   return code
 }
 
-const generatePassword = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-  let password = ''
-  for (let i = 0; i < 4; i++) {
-    password += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return password
-}
-
 // Tạo phòng thi
 export const createExamRoom = async (req, res) => {
   try {
-    const { subject_name, monitor_level, password } = req.body
+    const { subject_name, password } = req.body
     const teacher_id = req.user.userId
 
     if (!subject_name) {
@@ -43,7 +34,6 @@ export const createExamRoom = async (req, res) => {
       password: password || null,
       subject_name,
       teacher_id,
-      monitor_level: monitor_level || 'MEDIUM',
     })
 
     return res.status(201).json({ message: 'Tạo phòng thi thành công', room })
@@ -57,7 +47,7 @@ export const createExamRoom = async (req, res) => {
 export const updateExamRoom = async (req, res) => {
   try {
     const { id } = req.params
-    const { subject_name, monitor_level, password } = req.body
+    const { subject_name, password } = req.body
     const teacher_id = req.user.userId
 
     const room = await ExamRoom.findOne({ where: { id, teacher_id } })
@@ -68,7 +58,7 @@ export const updateExamRoom = async (req, res) => {
       return res.status(400).json({ message: 'Chỉ có thể sửa phòng thi chưa bắt đầu' })
     }
 
-    await room.update({ subject_name, monitor_level, password })
+    await room.update({ subject_name, password })
 
     return res.status(200).json({ message: 'Cập nhật phòng thi thành công', room })
   } catch (error) {
@@ -91,7 +81,6 @@ export const deleteExamRoom = async (req, res) => {
     // Xóa tất cả dữ liệu liên quan
     const participants = await ExamParticipant.findAll({ where: { room_id: id } })
     for (const p of participants) {
-      // Xóa sessions của participant
       const sessions = await MonitoringSession.findAll({ where: { participant_id: p.id } })
       for (const s of sessions) {
         await ViolationEvent.destroy({ where: { session_id: s.id } })
@@ -100,7 +89,6 @@ export const deleteExamRoom = async (req, res) => {
     }
     await ExamParticipant.destroy({ where: { room_id: id } })
 
-    // Xóa phòng
     await room.destroy()
 
     return res.status(200).json({ message: 'Xóa phòng thi và tất cả dữ liệu liên quan thành công' })

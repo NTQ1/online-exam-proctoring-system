@@ -4,7 +4,7 @@ import User  from '../models/User.js'
 import crypto from 'crypto'
 import Session from '../models/Session.js'
 
-const ACCESS_TOKEN_TTL = '30m' // 30 phút
+const ACCESS_TOKEN_TTL = '2h' // 2 giờ
 const REFRESH_TOKEN_TTL = 7 * 24 * 60 * 60 * 1000; // 7 ngày 
 // Đăng ký tài khoản mới
 export const signUp = async (req, res) => {

@@ -46,7 +46,8 @@ function sendViolation(type, data) {
       type: 'LOG_VIOLATION',
       data: {
         type,
-        severity: type === 'FULLSCREEN_EXIT' ? 'high' : 'info',
+        // FULLSCREEN_EXIT và FULLSCREEN_RESTORED đều high để đảm bảo đẩy lên blockchain
+        severity: (type === 'FULLSCREEN_EXIT' || type === 'FULLSCREEN_RESTORED') ? 'high' : 'info',
         feature: 'fullscreen-monitor',
         timestamp: Date.now(),
         details: data,
