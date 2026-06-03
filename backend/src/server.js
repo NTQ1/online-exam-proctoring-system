@@ -9,8 +9,10 @@ import userRouter from './routes/userRouter.js'
 import examParticipantRouter from './routes/examParticipantRoute.js'
 import examRoomRouter from './routes/examRoomRoute.js'
 import proctorRouter from './routes/proctorRoute.js'
-
 import monitoringSessionRoutes from './routes/monitoringSessionRoutes.js'
+import violationRouter from './routes/violationRoute.js'   // thêm dòng này
+import examHistoryRouter from './routes/examHistoryRoutes.js'
+
 
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -23,15 +25,11 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 5001
 
-// Serve static files từ public/:
-//  - /screenshots/<file>          → public/screenshots/<file>
-//  - /ai-violations/<file>         → public/ai-violations/<file>
 app.use(express.static(path.join(__dirname, '../public')))
 app.use('/screenshots', express.static(path.join(__dirname, '../public/screenshots')))
 app.use('/ai-violations', express.static(path.join(__dirname, '../public/ai-violations')))
 app.use('/uploads/ai-violations', express.static(path.join(__dirname, '../public/ai-violations')))
 
-//middleware
 app.use(express.json({ limit: '50mb' }))
 app.use(cookieParser())
 
@@ -40,19 +38,16 @@ app.use(cors({
   credentials: true
 }))
 
-//public routes
+// public routes
 app.use('/api/auth', authRoute)
-
-// Proctoring extension routes
 app.use('/api', proctorRouter)
-
-// Monitoring session routes
 app.use('/api/sessions', monitoringSessionRoutes)
-
-// Public participant routes (join room / extension auth) must be registered before protectedRoute
 app.use('/api/exam-participants', examParticipantRouter)
+app.use('/api/violations', violationRouter)   // thêm dòng này
+app.use('/api/exam-history', examHistoryRouter)
 
-//private routes
+
+// private routes
 app.use(protectedRoute)
 
 app.use('/api/user', userRouter)

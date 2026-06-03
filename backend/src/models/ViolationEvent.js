@@ -12,7 +12,7 @@ const ViolationEvent = sequelize.define('ViolationEvent', {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: ExamParticipant,
+      model: 'exam_participants',
       key: 'id',
     },
   },
@@ -52,6 +52,12 @@ const ViolationEvent = sequelize.define('ViolationEvent', {
 }, {
   tableName: 'violation_events',
   timestamps: true,
+})
+
+// Associations - đổi alias thành 'violationParticipant'
+ViolationEvent.belongsTo(ExamParticipant, {
+  foreignKey: 'participant_id',
+  as: 'violationParticipant',
 })
 
 export default ViolationEvent

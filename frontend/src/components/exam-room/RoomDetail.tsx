@@ -66,6 +66,13 @@ const verdictMap = {
   pending:  { label: 'Chờ xét',   icon: Clock,       color: 'text-yellow-600'},
 }
 
+// Hàm tạo full URL cho ảnh
+const getFullImageUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null
+  if (url.startsWith('http')) return url
+  return `${API_BASE}${url}`
+}
+
 const RoomDetailPage = () => {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -103,7 +110,6 @@ const RoomDetailPage = () => {
     fetchRoom()
     fetchParticipants()
 
-    // Auto-refresh mỗi 15s khi phòng thi đang active
     const interval = setInterval(() => {
       fetchParticipants()
     }, 15000)
@@ -130,13 +136,11 @@ const RoomDetailPage = () => {
     }
   }
 
-  // Lấy session mới nhất của participant
   const getLatestSession = (p: Participant): MonitoringSession | null => {
     if (!p.sessions || p.sessions.length === 0) return null
     return p.sessions[p.sessions.length - 1]
   }
 
-  // Thống kê nhanh
   const onlineCount     = participants.filter(p => p.status === 'online').length
   const suspiciousCount = participants.filter(p => p.status === 'suspicious').length
   const violatedCount   = participants.filter(p => {
@@ -203,7 +207,7 @@ const RoomDetailPage = () => {
           <CardContent className="flex items-center gap-3">
             <ShieldX className="size-5 text-red-500" />
             <div>
-              <p className="text-xs text-muted-foreground">Vi phạm</p>
+              <p className="text-xs text-muted-foreground">Sinh Viên Vi phạm</p>
               <p className="text-2xl font-bold">{violatedCount}</p>
             </div>
           </CardContent>
@@ -244,9 +248,7 @@ const RoomDetailPage = () => {
                   const aiViolations     = session?.violations?.filter(v => v.type === 'ai_violation').length ?? 0
                   const verdict          = session?.verdict ?? null
                   const verdictInfo      = verdict ? verdictMap[verdict] : null
-                  const screenshotUrl    = session?.screenshot_url
-                    ? `${API_BASE}${session.screenshot_url}`
-                    : null
+                  const screenshotUrl    = getFullImageUrl(session?.screenshot_url)
 
                   return (
                     <tr key={p.id} className="border-b hover:bg-muted/50 transition-colors">
@@ -307,7 +309,10 @@ const RoomDetailPage = () => {
                             <img
                               src={screenshotUrl}
                               alt="screenshot"
-                              className="w-16 h-10 object-cover rounded border hover:opacity-80 transition-opacity"
+                              className="w-24 h-14 object-cover rounded border hover:opacity-80 transition-opacity"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none'
+                              }}
                             />
                           </a>
                         ) : (

@@ -1,4 +1,7 @@
 import ExamRoom from '../models/ExamRoom.js'
+import ExamParticipant from '../models/ExamParticipant.js'
+import MonitoringSession from '../models/MonitoringSession.js'
+import ViolationEvent from '../models/ViolationEvent.js'
 
 const generateRoomCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -21,7 +24,7 @@ const generatePassword = () => {
 // Tạo phòng thi
 export const createExamRoom = async (req, res) => {
   try {
-    const { subject_name, monitor_level, password } = req.body  // ✅ thêm password
+    const { subject_name, monitor_level, password } = req.body
     const teacher_id = req.user.userId
 
     if (!subject_name) {
@@ -37,7 +40,7 @@ export const createExamRoom = async (req, res) => {
 
     const room = await ExamRoom.create({
       code,
-      password: password || null,  // ✅ null nếu không nhập
+      password: password || null,
       subject_name,
       teacher_id,
       monitor_level: monitor_level || 'MEDIUM',
@@ -49,11 +52,12 @@ export const createExamRoom = async (req, res) => {
     return res.status(500).json({ message: 'Lỗi hệ thống', error: error.message })
   }
 }
+
 // Cập nhật phòng thi (chỉ khi pending)
 export const updateExamRoom = async (req, res) => {
   try {
     const { id } = req.params
-    const { subject_name, monitor_level, password } = req.body  // ✅ thêm password
+    const { subject_name, monitor_level, password } = req.body
     const teacher_id = req.user.userId
 
     const room = await ExamRoom.findOne({ where: { id, teacher_id } })
@@ -64,7 +68,7 @@ export const updateExamRoom = async (req, res) => {
       return res.status(400).json({ message: 'Chỉ có thể sửa phòng thi chưa bắt đầu' })
     }
 
-    await room.update({ subject_name, monitor_level, password })  // ✅ thêm password
+    await room.update({ subject_name, monitor_level, password })
 
     return res.status(200).json({ message: 'Cập nhật phòng thi thành công', room })
   } catch (error) {
@@ -73,7 +77,7 @@ export const updateExamRoom = async (req, res) => {
   }
 }
 
-// Xóa phòng thi (chỉ khi pending)
+// Xóa phòng thi (mọi trạng thái)
 export const deleteExamRoom = async (req, res) => {
   try {
     const { id } = req.params
@@ -83,13 +87,23 @@ export const deleteExamRoom = async (req, res) => {
     if (!room) {
       return res.status(404).json({ message: 'Phòng thi không tồn tại' })
     }
-    if (room.status !== 'pending') {
-      return res.status(400).json({ message: 'Chỉ có thể xóa phòng thi chưa bắt đầu' })
-    }
 
+    // Xóa tất cả dữ liệu liên quan
+    const participants = await ExamParticipant.findAll({ where: { room_id: id } })
+    for (const p of participants) {
+      // Xóa sessions của participant
+      const sessions = await MonitoringSession.findAll({ where: { participant_id: p.id } })
+      for (const s of sessions) {
+        await ViolationEvent.destroy({ where: { session_id: s.id } })
+      }
+      await MonitoringSession.destroy({ where: { participant_id: p.id } })
+    }
+    await ExamParticipant.destroy({ where: { room_id: id } })
+
+    // Xóa phòng
     await room.destroy()
 
-    return res.status(200).json({ message: 'Xóa phòng thi thành công' })
+    return res.status(200).json({ message: 'Xóa phòng thi và tất cả dữ liệu liên quan thành công' })
   } catch (error) {
     console.error('Lỗi khi xóa phòng thi', error)
     return res.status(500).json({ message: 'Lỗi hệ thống', error: error.message })

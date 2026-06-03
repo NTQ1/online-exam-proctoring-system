@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import ExamRoom from './pages/ExamRoomPage'
 import RoomDetailPage from './pages/RoomDetailPage'
 import StudentPage from './pages/StudentPage'
+import ExamHistoryPage from './pages/ExamHistoryPage'
 
 function App() {
   return (  
@@ -25,7 +26,9 @@ function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/rooms" element={<ExamRoom />} />
               <Route path="/rooms/:id" element={<RoomDetailPage />} />
+              <Route path="/history" element={<ExamHistoryPage />} />
             </Route>
+           
 
             {/* student routes */}
             <Route element={<ProtectedRoute allowedRoles={['student']} />}>

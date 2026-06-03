@@ -39,9 +39,18 @@ interface Props {
   onClose: () => void
 }
 
+// Hàm tạo full URL cho ảnh
+const getFullUrl = (url: string | null | undefined, base: string): string | null => {
+  if (!url) return null
+  if (url.startsWith('http')) return url
+  return `${base}${url}`
+}
+
 // Map loại vi phạm → icon & nhãn hiển thị
 const violationTypeMap: Record<string, { label: string; Icon: ElementType; color: string }> = {
   ai_violation:            { label: 'AI phát hiện',         Icon: Camera,       color: 'text-red-600'    },
+  TAB_AWAY:                { label: 'Rời khỏi tab thi',     Icon: MonitorOff,   color: 'text-orange-600' },
+  TAB_RETURN:              { label: 'Quay lại tab thi',     Icon: MonitorOff,   color: 'text-blue-600'   },
   TAB_SWITCH:              { label: 'Chuyển tab',            Icon: MonitorOff,   color: 'text-orange-600' },
   tab_switch:              { label: 'Chuyển tab',            Icon: MonitorOff,   color: 'text-orange-600' },
   FULLSCREEN_EXIT:         { label: 'Thoát toàn màn hình',  Icon: Maximize2,    color: 'text-orange-600' },
@@ -74,7 +83,7 @@ const SessionDetailDialog = ({ session, apiBase, onClose }: Props) => {
   const aiViolations  = session.violations.filter(v => v.type === 'ai_violation')
   const otherViolations = session.violations.filter(v => v.type !== 'ai_violation')
   const verdict       = session.verdict ? verdictConfig[session.verdict] : null
-  const screenshotUrl = session.screenshot_url ? `${apiBase}${session.screenshot_url}` : null
+  const screenshotUrl = getFullUrl(session.screenshot_url, apiBase)
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -122,6 +131,9 @@ const SessionDetailDialog = ({ session, apiBase, onClose }: Props) => {
                     src={screenshotUrl}
                     alt="Screenshot cuối phiên"
                     className="rounded-lg border w-full max-h-64 object-contain bg-muted hover:opacity-90 transition-opacity cursor-zoom-in"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none'
+                    }}
                   />
                 </a>
               </section>
@@ -138,7 +150,7 @@ const SessionDetailDialog = ({ session, apiBase, onClose }: Props) => {
                 <div className="grid grid-cols-2 gap-3">
                   {aiViolations.map((v) => {
                     const detections = (v.details?.detections as Array<{ className: string; confidence: number }>) || []
-                    const imgUrl = v.image_url ? `${apiBase}${v.image_url}` : null
+                    const imgUrl = getFullUrl(v.image_url, apiBase)
                     return (
                       <div key={v.id} className="rounded-lg border bg-red-50/40 p-3 space-y-2">
                         {imgUrl && (
@@ -147,6 +159,9 @@ const SessionDetailDialog = ({ session, apiBase, onClose }: Props) => {
                               src={imgUrl}
                               alt="AI violation"
                               className="w-full h-28 object-cover rounded border cursor-zoom-in hover:opacity-80 transition-opacity"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none'
+                              }}
                             />
                           </a>
                         )}

@@ -25,7 +25,7 @@ import {
 const menuItems = [
   { title: "Tổng quan", icon: LayoutDashboard, path: "/" },
   { title: "Phòng thi", icon: BookOpen, path: "/rooms" },
-  { title: "Báo cáo", icon: FileBarChart, path: "/reports" },
+  { title: "Blockchain", icon: FileBarChart, path: "/blockchain" },
   { title: "Lịch sử thi", icon: History, path: "/history" },
   { title: "Cài đặt", icon: Settings, path: "/settings" },
 ]

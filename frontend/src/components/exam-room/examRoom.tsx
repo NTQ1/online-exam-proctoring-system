@@ -132,15 +132,25 @@ const RoomsPage = () => {
                       </>
                     )}
                     {room.status === 'active' && (
+                      <>
                       <Button size="sm" variant="destructive" className="flex-1 gap-1" onClick={(e) => handleEnd(e, room.id)}>
                         <Square className="size-3" />
                         Kết thúc
                       </Button>
+                      <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={(e) => handleDelete(e, room.id)}>
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </>
                     )}
                     {room.status === 'ended' && (
+                      <>
                       <Button size="sm" variant="outline" className="flex-1" disabled>
                         Đã kết thúc
                       </Button>
+                      <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={(e) => handleDelete(e, room.id)}>
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </>
                     )}
                   </div>
                 </CardContent>
