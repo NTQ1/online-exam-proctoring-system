@@ -6,7 +6,7 @@ import MonitoringSession from '../models/MonitoringSession.js'
 import ViolationEvent from '../models/ViolationEvent.js'
 import BlockchainRecord from '../models/BlockchainRecord.js'
 
-// Define relationships
+// Định nghĩa quan hệ giữa các model
 User.hasMany(ExamRoom, { foreignKey: 'teacher_id', as: 'exam_rooms' })
 ExamRoom.hasMany(ExamParticipant, { foreignKey: 'room_id', as: 'participants' })
 ExamParticipant.hasMany(MonitoringSession, { foreignKey: 'participant_id', as: 'sessions' })
@@ -23,7 +23,7 @@ export async function connectDB() {
     await sequelize.authenticate()
     console.log('Kết nối database thành công')
 
-    await sequelize.sync({ force: false }) // ← bỏ alter: true
+    await sequelize.sync({ force: false }) 
     console.log('Đồng bộ bảng thành công')
 
   } catch (error) {

@@ -18,7 +18,7 @@ interface RoomViolation {
 }
 
 const ViolationStatistics = () => {
-  const [rooms, setRooms] = useState<RoomViolation[]>([])
+  const [rooms, setRooms] = useState<RoomViolation[]>([]) 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,10 +41,10 @@ const ViolationStatistics = () => {
   }
 
   const top5Rooms = [...rooms]
-    .sort((a, b) => b.total_violations - a.total_violations)
-    .slice(0, 5)
+    .sort((a, b) => b.total_violations - a.total_violations) // Sắp xếp giảm dần theo số vi phạm
+    .slice(0, 5) // Lấy 5 phòng đầu tiên (nhiều vi phạm nhất)
 
-  const totalViolations = rooms.reduce((sum, r) => sum + r.total_violations, 0)
+ 
 
   if (loading) {
     return (
@@ -100,7 +100,7 @@ const ViolationStatistics = () => {
             ) : (
               <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={rooms}>
+                  <BarChart data={rooms}> 
                     <defs>
                       <linearGradient id="violetGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#a78bfa" />
@@ -147,9 +147,9 @@ const ViolationStatistics = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold truncate">
-                          {index === 0 && "🥇 "}
-                          {index === 1 && "🥈 "}
-                          {index === 2 && "🥉 "}
+                          {index === 0 && "1 "}
+                          {index === 1 && "2 "}
+                          {index === 2 && "3 "}
                           {index > 2 && `${index + 1}. `}
                           {room.room_code}
                         </p>

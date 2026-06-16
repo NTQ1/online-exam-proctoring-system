@@ -1,6 +1,7 @@
 import MonitoringSession from '../models/MonitoringSession.js'
 import ExamParticipant from '../models/ExamParticipant.js'
 
+
 export const startSession = async (req, res) => {
   try {
     const { participantId } = req.body
@@ -17,9 +18,9 @@ export const startSession = async (req, res) => {
 
     const session = await MonitoringSession.create({
       participant_id: participantId,
-      status: 'active',
+      status: 'active', 
       start_time: new Date(),
-      verdict: 'pending',
+      verdict: 'pending', 
     })
 
     return res.status(201).json({
@@ -53,7 +54,7 @@ export const finalizeSession = async (req, res) => {
     }
 
     session.status = 'finalized'
-    session.end_time = new Date()
+    session.end_time = new Date() 
     session.end_reason = endReason
     session.screenshot_url = screenshotDataUrl
     session.trigger_blockchain = true
@@ -72,6 +73,7 @@ export const finalizeSession = async (req, res) => {
     })
   }
 }
+
 
 export const heartbeatSession = async (req, res) => {
   try {

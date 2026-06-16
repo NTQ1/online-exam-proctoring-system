@@ -15,26 +15,26 @@ export const getExamHistory = async (req, res) => {
       page = 1, limit = 20 
     } = req.query
 
-    const pageSize = Math.min(parseInt(limit) || 20, 100)
-    const pageNum = Math.max(parseInt(page) || 1, 1)
-    const offset = (pageNum - 1) * pageSize
+    const pageSize = Math.min(parseInt(limit) || 20, 100) // giới hạn max 100 bản ghi mỗi trang
+    const pageNum = Math.max(parseInt(page) || 1, 1) // đảm bảo page >= 1
+    const offset = (pageNum - 1) * pageSize // tính offset cho phân trang
 
     // Lấy tất cả sessions
     const where = {}
     if (verdict) where.verdict = verdict
 
-    const { count, rows: sessions } = await MonitoringSession.findAndCountAll({
-      where,
-      order: [['createdAt', 'DESC']],
-      limit: pageSize,
-      offset,
+    const { count, rows: sessions } = await MonitoringSession.findAndCountAll({ 
+      where, // lọc theo verdict nếu có
+      order: [['createdAt', 'DESC']], // sắp xếp theo thời gian mới nhất
+      limit: pageSize, // giới hạn số bản ghi trả về
+      offset, 
     })
 
     // Lấy thông tin thủ công
     const data = []
-    for (const s of sessions) {
+    for (const s of sessions) { 
       // Lấy participant
-      const participant = await ExamParticipant.findByPk(s.participant_id)
+      const participant = await ExamParticipant.findByPk(s.participant_id) 
       if (!participant) continue
 
       // Nếu có filter search mà ko khớp → bỏ qua

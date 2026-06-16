@@ -7,7 +7,7 @@
 //    VPS:       'https://your-domain.com'  hoặc  'http://103.x.x.x:5001'
 //    Dev local: 'http://localhost:5001'
 // ─────────────────────────────────────────────────────────
-const SERVER_HOST = 'http://localhost:5001'
+const SERVER_HOST = 'http://172.26.12.45:5001'
 
 // Server configuration
 export const SERVER_CONFIG = {

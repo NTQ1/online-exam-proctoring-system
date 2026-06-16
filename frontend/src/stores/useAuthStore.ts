@@ -12,7 +12,7 @@ export const useAuthStore = create<AuthState>()(
       loading: false,
       setAccessToken: (token: string) => set({ accessToken: token }),
       clearState: () => set({ accessToken: null, user: null, loading: false }),
-
+// Đăng ký sẽ gọi API để tạo tài khoản mới, không tự động đăng nhập sau khi đăng ký
       signUp: async (username, email, password, firstName, lastName, role) => {
         try {
           set({ loading: true });
@@ -25,12 +25,12 @@ export const useAuthStore = create<AuthState>()(
           set({ loading: false });
         }
       },
-
+// Đăng nhập sẽ gọi API để lấy token và thông tin người dùng, sau đó lưu vào state
       signin: async (username, password) => {
         try {
           set({ loading: true });
           const res = await authService.signin(username, password);
-          set({ accessToken: res.accessToken, user: res.user });
+          set({ accessToken: res.accessToken, user: res.user }); 
           toast.success("Đăng nhập thành công!");
         } catch (error) {
           console.error(error);
@@ -39,7 +39,7 @@ export const useAuthStore = create<AuthState>()(
           set({ loading: false });
         }
       },
-
+// Đăng xuất sẽ xóa token và thông tin người dùng khỏi state, đồng thời gọi API để xóa cookie trên server
       signOut: async () => {
         try {
           get().clearState();

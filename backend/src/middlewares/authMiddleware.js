@@ -17,7 +17,7 @@ export const protectedRoute = async (req, res, next) => {
             process.env.ACCESS_TOKEN_SECRET
         );
         //tìm user
-       const user = await User.findByPk(decodedUser.userId, {
+       const user = await User.findByPk(decodedUser.userId, { 
             attributes: { exclude: ['password_hash'] }
         }); // lấy tất cả trừ mật khẩu
 
