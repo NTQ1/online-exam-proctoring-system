@@ -1,50 +1,57 @@
 # Online Exam Proctoring System
 
-An online examination monitoring system consisting of a Chrome Extension for students and a Web Dashboard for instructors.
+A web-based online examination monitoring system built with **Node.js**, **Express.js**, **React**, and **Chrome Extension (Manifest V3)**.
 
-## Overview
+The system provides a standalone monitoring layer for online examinations, allowing instructors to manage exam sessions and review student activities while students are monitored through a Chrome Extension.
 
-The system provides a standalone monitoring layer for online examinations without requiring integration with existing learning management systems.
-
-Students install a Chrome Extension that monitors exam behavior and reports violations to the server. Instructors can manage exam rooms and review monitoring reports through a web dashboard.
+---
 
 ## Features
 
-### Instructor Dashboard
+### Exam Room Management
 
 * Create and manage exam rooms
 * Generate unique room codes
-* View student participation
-* Monitor violation reports
-* Review post-exam evidence and reports
+* Manage exam sessions
+* View student participation records
 
-### Student Extension
+### Student Monitoring
 
 * Join exam rooms using room code
 * Start and end monitoring sessions
-* Fullscreen enforcement
-* Activity tracking during exams
+* Fullscreen enforcement during examinations
+* Session activity tracking
 
-### Monitoring Functions
+### Violation Detection
 
-* Block copy, paste, cut, right-click
-* Detect tab switching and window blur
+* Block copy, paste, cut, and right-click actions
+* Detect tab switching
+* Detect window focus loss
 * Detect fullscreen exit
-* Detect browser DevTools opening
-* AI-based webcam monitoring
-* Capture evidence images for serious violations
+* Detect browser DevTools usage
+* Record suspicious activities
+
+### AI Monitoring
+
+* Face detection using TensorFlow.js
+* Detect absence of face
+* Detect multiple faces
+* Detect abnormal head movement
+* Capture evidence images for severe violations
 
 ### Offline Support
 
-* Store logs locally when internet connection is lost
-* Automatically synchronize logs after reconnection
-* Preserve timestamps for offline events
+* Store logs locally when internet connection is unavailable
+* Synchronize logs automatically after reconnection
+* Preserve original event timestamps
 
 ### Blockchain Verification
 
-* Generate SHA-256 hash of session logs
-* Store hashes on Polygon Testnet
-* Verify integrity of monitoring records
+* Generate SHA-256 hashes for monitoring logs
+* Store verification hashes on Polygon Testnet
+* Verify integrity of recorded evidence
+
+---
 
 ## Technology Stack
 
@@ -66,7 +73,8 @@ Students install a Chrome Extension that monitors exam behavior and reports viol
 ### Chrome Extension
 
 * Manifest V3
-* Chrome APIs
+* Chrome Storage API
+* Chrome Runtime API
 * TensorFlow.js
 
 ### Blockchain
@@ -74,15 +82,9 @@ Students install a Chrome Extension that monitors exam behavior and reports viol
 * Polygon Testnet
 * SHA-256
 
-## Project Structure
+---
 
-```text
-backend/
-frontend/
-ProctorSystemExtension/
-```
-
-## Architecture
+## System Architecture
 
 ```text
 Chrome Extension
@@ -91,26 +93,116 @@ Chrome Extension
         v
 Node.js + Express Server
         |
-        v
-MySQL Database
+        +------ MySQL Database
+        |
+        +------ Blockchain Service
+                     |
+                     v
+              Polygon Testnet
 
-Instructor Dashboard
+React Dashboard
         |
         | REST API
         v
 Node.js + Express Server
-
-Blockchain Service
-        |
-        v
-Polygon Testnet
 ```
 
-## Main Modules
+---
 
-* Exam Room Management
-* Student Session Management
-* Violation Detection
-* AI Monitoring
-* Offline Synchronization
-* Blockchain Verification
+## Project Structure
+
+```text
+backend/
+│
+├── src/
+│   ├── controllers/
+│   ├── middlewares/
+│   ├── models/
+│   ├── routes/
+│   ├── services/
+│   └── config/
+
+frontend/
+│
+├── src/
+│   ├── components/
+│   ├── pages/
+│   ├── stores/
+│   └── services/
+
+ProctorSystemExtension/
+│
+├── src/
+│   ├── background/
+│   ├── content/
+│   ├── popup/
+│   ├── core/
+│   ├── feature/
+│   └── services/
+```
+
+---
+
+## Installation
+
+### Backend
+
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Chrome Extension
+
+1. Open Chrome
+2. Navigate to `chrome://extensions`
+3. Enable **Developer Mode**
+4. Click **Load unpacked**
+5. Select the `ProctorSystemExtension` folder
+
+---
+
+## Screenshots
+
+### Dashboard
+
+<img width="1920" height="920" alt="image" src="https://github.com/user-attachments/assets/5689be32-184f-4452-977e-1cbfd22b5147" />
+
+
+### Exam Room Management
+
+<img width="1918" height="926" alt="image" src="https://github.com/user-attachments/assets/e600143c-a034-43b6-b89b-cb5832714152" />
+
+
+### Chrome Extension
+
+<img width="1919" height="982" alt="image" src="https://github.com/user-attachments/assets/58ea20fc-e98e-4ecc-a6a0-83fef0e6e210" />
+
+---
+
+## Future Improvements
+
+* Real-time monitoring dashboard
+* Enhanced AI behavior analysis
+* Multi-browser support
+* Advanced reporting and analytics
+* Production blockchain deployment
+
+---
+
+## Author
+
+**Nguyen Thanh Quy**
+
+Backend Developer Intern
+
+Node.js | Express.js | MySQL | REST API
